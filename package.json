@@ -1,0 +1,20 @@
+{
+  "name": "facebook-ai-auto-poster",
+  "version": "1.0.0",
+  "description": "AI-powered scheduled posting bot for Facebook Pages using OpenAI and Meta Graph API.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "node-cron": "^4.2.1",
+    "openai": "^6.7.0"
+  }
+}
