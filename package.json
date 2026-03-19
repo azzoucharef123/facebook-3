@@ -1,7 +1,7 @@
 {
   "name": "facebook-ai-auto-poster",
   "version": "1.0.0",
-  "description": "AI-powered scheduled posting bot for Facebook Pages using OpenAI and Meta Graph API.",
+  "description": "AI-powered scheduled posting dashboard for Facebook Pages using Gemini and Meta Graph API.",
   "private": true,
   "type": "module",
   "scripts": {

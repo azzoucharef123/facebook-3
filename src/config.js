@@ -35,6 +35,7 @@ function computeAiProvider() {
 export const config = {
   port: Number(process.env.PORT || 3000),
   baseUrl: computeBaseUrl(),
+  dashboardAccessCode: "5598",
   aiProvider: computeAiProvider(),
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-3-pro-preview",

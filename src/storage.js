@@ -12,6 +12,8 @@ const defaultState = {
   },
   posts: [],
   scheduler: {
+    enabled: true,
+    intervalMinutes: config.postIntervalMinutes,
     lastRunAt: "",
     lastResult: "",
     lastError: ""
@@ -25,9 +27,20 @@ export function readState() {
 
   try {
     const raw = fs.readFileSync(config.stateFile, "utf8");
+    const parsed = JSON.parse(raw);
+
     return {
       ...structuredClone(defaultState),
-      ...JSON.parse(raw)
+      ...parsed,
+      facebook: {
+        ...structuredClone(defaultState.facebook),
+        ...(parsed.facebook || {})
+      },
+      posts: Array.isArray(parsed.posts) ? parsed.posts : [],
+      scheduler: {
+        ...structuredClone(defaultState.scheduler),
+        ...(parsed.scheduler || {})
+      }
     };
   } catch {
     return structuredClone(defaultState);
