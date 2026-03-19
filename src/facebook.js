@@ -104,3 +104,33 @@ export async function publishPagePost({ pageId, pageAccessToken, message }) {
     }
   });
 }
+
+export async function getPageProfile({ pageId, pageAccessToken }) {
+  return graphRequest(`/${pageId}`, {
+    query: {
+      access_token: pageAccessToken,
+      fields: "id,name,fan_count,followers_count,link"
+    }
+  });
+}
+
+export async function getPostDetails({ postId, pageAccessToken }) {
+  return graphRequest(`/${postId}`, {
+    query: {
+      access_token: pageAccessToken,
+      fields: "id,message,created_time,permalink_url,comments.summary(true),reactions.summary(true),shares"
+    }
+  });
+}
+
+export async function getPostComments({ postId, pageAccessToken, limit = 10 }) {
+  const response = await graphRequest(`/${postId}/comments`, {
+    query: {
+      access_token: pageAccessToken,
+      fields: "id,created_time,message,from{id,name}",
+      limit
+    }
+  });
+
+  return response.data || [];
+}

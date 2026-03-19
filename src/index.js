@@ -5,87 +5,32 @@ import {
   exchangeCodeForLongLivedUserToken,
   getFacebookLoginUrl,
   getManagedPages,
+  getPageProfile,
+  getPostComments,
+  getPostDetails,
   publishPagePost
 } from "./facebook.js";
 import { generatePost, getActiveAiModel } from "./ai.js";
-import {
-  getSchedulerSnapshot,
-  schedulerIsActive,
-  startScheduler,
-  stopScheduler
-} from "./scheduler.js";
+import { getSchedulerSnapshot, schedulerIsActive, startScheduler, stopScheduler } from "./scheduler.js";
 import { readState, updateState } from "./storage.js";
+import {
+  escapeHtml,
+  icons,
+  renderDashboardPage,
+  renderField,
+  renderFormSection,
+  renderItems,
+  renderLoginPage,
+  renderMetrics,
+  sectionExists
+} from "./dashboard.js";
 
 const app = express();
 const DASHBOARD_COOKIE = "dashboard_session";
 
-const icons = {
-  shield: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3l7 3v6c0 4.9-3 8.9-7 10-4-1.1-7-5.1-7-10V6l7-3z"></path>
-      <path d="M9.5 12.5l1.7 1.7 3.8-4.2"></path>
-    </svg>
-  `,
-  clock: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="9"></circle>
-      <path d="M12 7v5l3 2"></path>
-    </svg>
-  `,
-  spark: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3l1.9 4.8L19 9.7l-4 3.2 1.3 5.1L12 15.3 7.7 18l1.3-5.1-4-3.2 5.1-1.9L12 3z"></path>
-    </svg>
-  `,
-  page: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="5" y="3" width="14" height="18" rx="2"></rect>
-      <path d="M8 8h8M8 12h8M8 16h5"></path>
-    </svg>
-  `,
-  play: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 6l10 6-10 6z"></path>
-    </svg>
-  `,
-  link: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M10 13a4 4 0 0 1 0-6l2-2a4 4 0 1 1 6 6l-1 1"></path>
-      <path d="M14 11a4 4 0 0 1 0 6l-2 2a4 4 0 1 1-6-6l1-1"></path>
-    </svg>
-  `,
-  logout: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M10 17l5-5-5-5"></path>
-      <path d="M15 12H4"></path>
-      <path d="M12 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"></path>
-    </svg>
-  `,
-  lock: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="5" y="11" width="14" height="10" rx="2"></rect>
-      <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
-    </svg>
-  `,
-  status: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 18l4-5 3 3 6-8"></path>
-      <path d="M4 20h16"></path>
-    </svg>
-  `
-};
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", true);
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function parseCookies(req) {
   const header = req.headers.cookie || "";
@@ -133,16 +78,12 @@ function buildCookie(name, value, options = {}) {
 }
 
 function getDashboardSessionToken() {
-  const seed = config.facebookAppSecret || config.baseUrl || config.stateFile;
-  return crypto
-    .createHash("sha256")
-    .update(`${config.dashboardAccessCode}:${seed}`)
-    .digest("hex");
+  const seed = config.facebookAppSecret || config.facebookPageAccessToken || config.baseUrl;
+  return crypto.createHash("sha256").update(`${config.dashboardAccessCode}:${seed}`).digest("hex");
 }
 
 function isDashboardAuthenticated(req) {
-  const cookies = parseCookies(req);
-  return cookies[DASHBOARD_COOKIE] === getDashboardSessionToken();
+  return parseCookies(req)[DASHBOARD_COOKIE] === getDashboardSessionToken();
 }
 
 function setDashboardSession(res) {
@@ -190,18 +131,16 @@ function ensureDashboardAuth(req, res, next) {
   }
 
   const acceptsJson = (req.headers.accept || "").includes("application/json");
-
   if (acceptsJson || req.path === "/status") {
-    res.status(401).json({
-      ok: false,
-      error: "Dashboard authentication required."
-    });
+    res.status(401).json({ ok: false, error: "Dashboard authentication required." });
     return;
   }
 
-  redirectWithMessage(res, "/login", {
-    error: "ادخل كود الداشبورد أولاً."
-  });
+  res.type("html").send(
+    renderLoginPage({
+      error: "أدخل الكود أولاً للوصول إلى الداشبورد."
+    })
+  );
 }
 
 function getScheduleSettings(state = readState()) {
@@ -213,6 +152,13 @@ function getScheduleSettings(state = readState()) {
   return {
     enabled: state.scheduler.enabled !== false,
     intervalMinutes
+  };
+}
+
+function getEffectiveContentSettings(state = readState()) {
+  return {
+    contentBrief: state.settings.contentBrief || config.contentBrief,
+    contentLanguage: state.settings.contentLanguage || config.contentLanguage
   };
 }
 
@@ -228,7 +174,7 @@ function getResolvedPageConnection(state = readState()) {
       pageName:
         state.facebook.pageId === config.facebookPageId && state.facebook.pageName
           ? state.facebook.pageName
-          : "Configured Facebook Page",
+          : "صفحتي على فيسبوك",
       mode: "direct"
     };
   }
@@ -238,30 +184,86 @@ function getResolvedPageConnection(state = readState()) {
   return {
     pageId: config.facebookPageId,
     pageAccessToken: hasMatchingPageToken ? state.facebook.pageAccessToken : "",
-    pageName: hasMatchingPageToken ? state.facebook.pageName || "My Facebook Page" : "My Facebook Page",
+    pageName: hasMatchingPageToken ? state.facebook.pageName || "صفحتي على فيسبوك" : "صفحتي على فيسبوك",
     mode: "oauth"
   };
+}
+
+function computeNextRunText(state = readState()) {
+  const schedule = getScheduleSettings(state);
+
+  if (!schedule.enabled) {
+    return "الجدولة متوقفة";
+  }
+
+  if (!state.scheduler.lastRunAt) {
+    return `بعد بدء الخدمة أو خلال ${schedule.intervalMinutes} دقيقة`;
+  }
+
+  const next = new Date(new Date(state.scheduler.lastRunAt).getTime() + schedule.intervalMinutes * 60 * 1000);
+  return next.toLocaleString("ar-MA", { dateStyle: "short", timeStyle: "short" });
+}
+
+function normalizeErrorMessage(error) {
+  const raw = String(error?.message || error || "").trim();
+
+  try {
+    const parsed = JSON.parse(raw);
+    const nested = parsed?.error?.message || parsed?.message || "";
+    if (nested) {
+      return nested;
+    }
+  } catch {}
+
+  if (raw.includes("429") || raw.includes("RESOURCE_EXHAUSTED")) {
+    return "تم تجاوز حصة Gemini الحالية. خفف عدد الطلبات أو راجع الخطة والفوترة.";
+  }
+
+  if (raw.includes("NOT_FOUND") && raw.includes("models/")) {
+    return "اسم نموذج Gemini غير صحيح أو غير مدعوم. راجع قيمة GEMINI_MODEL.";
+  }
+
+  return raw || "حدث خطأ غير معروف.";
+}
+
+async function refreshDirectPageProfile() {
+  if (!hasDirectPageAccessToken() || !config.facebookPageId) {
+    return;
+  }
+
+  try {
+    const profile = await getPageProfile({
+      pageId: config.facebookPageId,
+      pageAccessToken: config.facebookPageAccessToken
+    });
+
+    updateState((current) => {
+      current.facebook.pageId = profile.id || config.facebookPageId;
+      current.facebook.pageName = profile.name || current.facebook.pageName;
+      return current;
+    });
+  } catch {}
 }
 
 async function runPostingJob() {
   const state = readState();
   const connection = getResolvedPageConnection(state);
-  const pageId = connection.pageId;
-  const pageAccessToken = connection.pageAccessToken;
-  const pageName = connection.pageName;
+  const contentSettings = getEffectiveContentSettings(state);
 
-  if (!pageId || !pageAccessToken) {
-    throw new Error("The configured FB_PAGE_ID is not connected yet. Add FB_PAGE_ACCESS_TOKEN or reconnect Facebook for this page.");
+  if (!connection.pageId || !connection.pageAccessToken) {
+    throw new Error("الصفحة غير جاهزة بعد. أضف FB_PAGE_ACCESS_TOKEN الصحيح.");
   }
 
   const message = await generatePost({
-    pageName,
-    recentPosts: state.posts
+    pageName: connection.pageName,
+    recentPosts: state.posts,
+    contentBrief: contentSettings.contentBrief,
+    contentLanguage: contentSettings.contentLanguage
   });
 
   const publishResult = await publishPagePost({
-    pageId,
-    pageAccessToken,
+    pageId: connection.pageId,
+    pageAccessToken: connection.pageAccessToken,
     message
   });
 
@@ -271,9 +273,12 @@ async function runPostingJob() {
       message,
       createdAt: new Date().toISOString()
     });
-    current.posts = current.posts.slice(-20);
+    current.posts = current.posts.slice(-30);
+    current.preview.nextPost = "";
+    current.preview.generatedAt = "";
+    current.preview.lastError = "";
     current.scheduler.lastRunAt = new Date().toISOString();
-    current.scheduler.lastResult = `Posted successfully to ${pageName}`;
+    current.scheduler.lastResult = `تم النشر بنجاح على ${connection.pageName}`;
     current.scheduler.lastError = "";
     return current;
   });
@@ -293,7 +298,18 @@ function syncScheduler() {
     return getSchedulerSnapshot();
   }
 
-  startScheduler(runPostingJob, {
+  startScheduler(async () => {
+    try {
+      await runPostingJob();
+    } catch (error) {
+      updateState((current) => {
+        current.scheduler.lastRunAt = new Date().toISOString();
+        current.scheduler.lastError = normalizeErrorMessage(error);
+        return current;
+      });
+      console.error("[scheduler] failed:", normalizeErrorMessage(error));
+    }
+  }, {
     intervalMinutes: schedule.intervalMinutes,
     timezone: config.timezone
   });
@@ -301,602 +317,377 @@ function syncScheduler() {
   return getSchedulerSnapshot();
 }
 
-function getStatusTone(active, hasError) {
-  if (hasError) {
-    return "status-bad";
+function statusLevel(state = readState()) {
+  if (state.scheduler.lastError) {
+    return "bad";
   }
 
-  return active ? "status-good" : "status-warn";
+  if (!getScheduleSettings(state).enabled || !schedulerIsActive()) {
+    return "warn";
+  }
+
+  return "good";
 }
 
-function renderShell({ title, body, description = "" }) {
-  return `<!doctype html>
-  <html lang="ar" dir="rtl">
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>${escapeHtml(title)}</title>
-      <style>
-        :root {
-          color-scheme: light;
-          --bg: #f3f5ef;
-          --panel: rgba(255, 255, 255, 0.92);
-          --panel-strong: #ffffff;
-          --text: #1a2421;
-          --muted: #61706c;
-          --line: rgba(22, 42, 35, 0.12);
-          --brand: #0f6b5a;
-          --brand-strong: #0a5346;
-          --brand-soft: #d8efe8;
-          --gold: #c48a2c;
-          --danger: #bb4d4d;
-          --danger-soft: #fde7e7;
-          --warn-soft: #fff2d6;
-          --shadow: 0 18px 50px rgba(16, 39, 32, 0.14);
-          --radius: 24px;
-        }
-
-        * { box-sizing: border-box; }
-
-        body {
-          margin: 0;
-          font-family: Tahoma, Arial, sans-serif;
-          background:
-            radial-gradient(circle at top left, rgba(15, 107, 90, 0.18), transparent 32%),
-            radial-gradient(circle at bottom right, rgba(196, 138, 44, 0.16), transparent 28%),
-            linear-gradient(180deg, #eff3ec 0%, #f6f7f2 100%);
-          color: var(--text);
-          min-height: 100vh;
-        }
-
-        a { color: inherit; text-decoration: none; }
-
-        .shell {
-          width: min(1180px, calc(100vw - 28px));
-          margin: 24px auto;
-        }
-
-        .hero {
-          background: linear-gradient(135deg, rgba(8, 57, 49, 0.95), rgba(15, 107, 90, 0.92));
-          color: #f7fbfa;
-          border-radius: 30px;
-          padding: 28px;
-          box-shadow: var(--shadow);
-          position: relative;
-          overflow: hidden;
-        }
-
-        .hero::after {
-          content: "";
-          position: absolute;
-          inset: auto -80px -80px auto;
-          width: 220px;
-          height: 220px;
-          background: radial-gradient(circle, rgba(255, 255, 255, 0.2), transparent 68%);
-        }
-
-        .hero-head {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-
-        .eyebrow {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          padding: 10px 14px;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.12);
-          color: rgba(255, 255, 255, 0.92);
-          font-size: 14px;
-        }
-
-        .hero h1, .auth-card h1 {
-          margin: 14px 0 8px;
-          font-size: clamp(30px, 4vw, 44px);
-          line-height: 1.15;
-        }
-
-        .hero p, .auth-card p {
-          margin: 0;
-          color: rgba(255, 255, 255, 0.86);
-          max-width: 680px;
-          line-height: 1.8;
-        }
-
-        .toolbar {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .grid {
-          display: grid;
-          grid-template-columns: repeat(12, minmax(0, 1fr));
-          gap: 18px;
-          margin-top: 20px;
-        }
-
-        .card {
-          grid-column: span 12;
-          background: var(--panel);
-          backdrop-filter: blur(10px);
-          border: 1px solid var(--line);
-          border-radius: var(--radius);
-          padding: 22px;
-          box-shadow: 0 10px 30px rgba(22, 42, 35, 0.08);
-        }
-
-        .card-title {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin: 0 0 16px;
-          font-size: 20px;
-        }
-
-        .card-title svg,
-        .eyebrow svg,
-        .btn svg,
-        .metric-label svg {
-          width: 20px;
-          height: 20px;
-          fill: none;
-          stroke: currentColor;
-          stroke-width: 1.8;
-          stroke-linecap: round;
-          stroke-linejoin: round;
-          flex: 0 0 auto;
-        }
-
-        .metric-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-          gap: 14px;
-        }
-
-        .metric {
-          background: var(--panel-strong);
-          border: 1px solid var(--line);
-          border-radius: 20px;
-          padding: 16px;
-        }
-
-        .metric-label {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: var(--muted);
-          font-size: 14px;
-          margin-bottom: 10px;
-        }
-
-        .metric-value {
-          font-size: 22px;
-          font-weight: 700;
-          line-height: 1.35;
-          word-break: break-word;
-        }
-
-        .metric-note {
-          font-size: 13px;
-          color: var(--muted);
-          margin-top: 8px;
-        }
-
-        .status-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          border-radius: 999px;
-          padding: 8px 14px;
-          font-size: 14px;
-          font-weight: 700;
-        }
-
-        .status-good { background: #dff5ea; color: #0c6c48; }
-        .status-warn { background: var(--warn-soft); color: #8f6415; }
-        .status-bad { background: var(--danger-soft); color: var(--danger); }
-
-        .form-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 16px;
-        }
-
-        label {
-          display: block;
-          font-size: 14px;
-          color: var(--muted);
-          margin-bottom: 8px;
-        }
-
-        input[type="password"],
-        input[type="number"],
-        input[type="text"] {
-          width: 100%;
-          border: 1px solid rgba(20, 54, 45, 0.14);
-          border-radius: 16px;
-          padding: 14px 16px;
-          background: #fff;
-          color: var(--text);
-          font-size: 16px;
-          outline: none;
-        }
-
-        input:focus {
-          border-color: rgba(15, 107, 90, 0.5);
-          box-shadow: 0 0 0 4px rgba(15, 107, 90, 0.12);
-        }
-
-        .inline-actions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 18px;
-        }
-
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          border: 0;
-          border-radius: 16px;
-          padding: 13px 18px;
-          font-size: 15px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: transform 0.16s ease, box-shadow 0.16s ease;
-        }
-
-        .btn:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 12px 24px rgba(20, 54, 45, 0.12);
-        }
-
-        .btn-primary { background: var(--brand); color: #fff; }
-        .btn-secondary { background: var(--brand-soft); color: var(--brand-strong); }
-        .btn-ghost {
-          background: transparent;
-          color: #f4fbf8;
-          border: 1px solid rgba(255, 255, 255, 0.18);
-        }
-
-        .btn-danger { background: #fff1f1; color: var(--danger); }
-
-        .notice, .error-box {
-          border-radius: 18px;
-          padding: 14px 16px;
-          margin-bottom: 16px;
-          line-height: 1.7;
-        }
-
-        .notice {
-          background: #e7f4ef;
-          color: #0f6b5a;
-          border: 1px solid rgba(15, 107, 90, 0.16);
-        }
-
-        .error-box {
-          background: var(--danger-soft);
-          color: #8c2f2f;
-          border: 1px solid rgba(187, 77, 77, 0.18);
-        }
-
-        .toggle {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 14px 16px;
-          background: var(--panel-strong);
-          border: 1px solid var(--line);
-          border-radius: 16px;
-        }
-
-        .toggle input {
-          width: 20px;
-          height: 20px;
-          accent-color: var(--brand);
-        }
-
-        .list {
-          display: grid;
-          gap: 14px;
-        }
-
-        .post-item {
-          background: var(--panel-strong);
-          border: 1px solid var(--line);
-          border-radius: 18px;
-          padding: 16px;
-        }
-
-        .post-meta {
-          color: var(--muted);
-          font-size: 13px;
-          margin-bottom: 10px;
-        }
-
-        .post-body {
-          white-space: pre-wrap;
-          margin: 0;
-          line-height: 1.8;
-        }
-
-        .muted {
-          color: var(--muted);
-          line-height: 1.8;
-        }
-
-        .auth-wrap {
-          min-height: 100vh;
-          display: grid;
-          place-items: center;
-          padding: 24px;
-        }
-
-        .auth-card {
-          width: min(520px, 100%);
-          background: rgba(10, 55, 48, 0.95);
-          color: #f5fbf9;
-          border-radius: 30px;
-          padding: 30px;
-          box-shadow: var(--shadow);
-        }
-
-        .auth-card .muted {
-          color: rgba(245, 251, 249, 0.76);
-          margin-top: 12px;
-        }
-
-        .auth-field {
-          margin: 22px 0 12px;
-        }
-
-        .auth-card input {
-          background: rgba(255, 255, 255, 0.98);
-        }
-
-        .auth-card .notice,
-        .auth-card .error-box {
-          margin-top: 0;
-        }
-
-        @media (min-width: 860px) {
-          .span-4 { grid-column: span 4; }
-          .span-5 { grid-column: span 5; }
-          .span-7 { grid-column: span 7; }
-          .span-8 { grid-column: span 8; }
-        }
-
-        @media (max-width: 640px) {
-          .shell { width: min(100vw - 18px, 100%); margin: 12px auto; }
-          .hero, .card, .auth-card { border-radius: 24px; padding: 20px; }
-          .hero-head { align-items: stretch; }
-          .toolbar { width: 100%; }
-          .btn { width: 100%; }
-        }
-      </style>
-      ${description ? `<meta name="description" content="${escapeHtml(description)}" />` : ""}
-    </head>
-    <body>${body}</body>
-  </html>`;
-}
-
-function renderLoginPage({ notice = "", error = "" } = {}) {
-  return renderShell({
-    title: "تسجيل دخول الداشبورد",
-    description: "لوحة تحكم بوت النشر التلقائي على Facebook Page.",
-    body: `
-      <main class="auth-wrap">
-        <section class="auth-card">
-          <div class="eyebrow">${icons.lock}<span>Dashboard Access</span></div>
-          <h1>دخول الداشبورد</h1>
-          <p>أدخل كود الحماية لفتح لوحة التحكم الخاصة بالنشر، وضبط وقت الجدولة، ومتابعة حالة الصفحة.</p>
-          ${notice ? `<div class="notice">${escapeHtml(notice)}</div>` : ""}
-          ${error ? `<div class="error-box">${escapeHtml(error)}</div>` : ""}
-          <form method="post" action="/login">
-            <div class="auth-field">
-              <label for="accessCode">كود الدخول</label>
-              <input id="accessCode" name="accessCode" type="password" inputmode="numeric" autocomplete="off" placeholder="ادخل الكود" required />
-            </div>
-            <button class="btn btn-primary" type="submit">${icons.shield}<span>فتح الداشبورد</span></button>
-          </form>
-          <p class="muted">بعد تسجيل الدخول ستتمكن من التحكم بوقت النشر، متابعة وضع التوكن المباشر، وتشغيل نشر يدوي عند الحاجة.</p>
-        </section>
-      </main>
-    `
+async function generatePreviewPost() {
+  const state = readState();
+  const connection = getResolvedPageConnection(state);
+  const contentSettings = getEffectiveContentSettings(state);
+  const nextPost = await generatePost({
+    pageName: connection.pageName,
+    recentPosts: state.posts,
+    contentBrief: contentSettings.contentBrief,
+    contentLanguage: contentSettings.contentLanguage
   });
+
+  updateState((current) => {
+    current.preview.nextPost = nextPost;
+    current.preview.generatedAt = new Date().toISOString();
+    current.preview.lastError = "";
+    return current;
+  });
+
+  return nextPost;
 }
 
-function renderDashboard({ req, state, notice = "", error = "" }) {
-  const missing = getMissingCoreConfig();
+async function buildOverviewBody(state) {
   const schedule = getScheduleSettings(state);
-  const schedulerSnapshot = getSchedulerSnapshot();
-  const pageConnection = getResolvedPageConnection(state);
-  const isDirectMode = pageConnection.mode === "direct";
-  const connectedConfiguredPage = pageConnection.pageAccessToken ? pageConnection.pageName : "";
-  const recentPosts = state.posts.slice(-6).reverse();
-  const statusTone = getStatusTone(
-    schedulerIsActive() && schedule.enabled,
-    Boolean(state.scheduler.lastError)
+  const contentSettings = getEffectiveContentSettings(state);
+  const connection = getResolvedPageConnection(state);
+  const metrics = [
+    {
+      label: "حالة الجدولة",
+      value: schedule.enabled && schedulerIsActive() ? "نشطة" : "متوقفة",
+      level: statusLevel(state)
+    },
+    {
+      label: "وقت النشر",
+      value: `كل ${schedule.intervalMinutes} دقيقة`,
+      note: `المنطقة الزمنية: ${config.timezone}`,
+      icon: icons.clock
+    },
+    {
+      label: "المنشور التالي",
+      value: computeNextRunText(state),
+      note: state.preview.generatedAt ? `آخر معاينة: ${state.preview.generatedAt}` : "لا توجد معاينة محفوظة",
+      icon: icons.spark
+    },
+    {
+      label: "الصفحة",
+      value: connection.pageName,
+      note: `FB_PAGE_ID: ${config.facebookPageId}`,
+      icon: icons.page
+    },
+    {
+      label: "عدد المنشورات",
+      value: String(state.posts.length),
+      note: state.scheduler.lastResult || "لا توجد نتيجة حديثة",
+      icon: icons.posts
+    },
+    {
+      label: "محتوى المنشورات",
+      value: contentSettings.contentLanguage,
+      note: contentSettings.contentBrief.slice(0, 90),
+      icon: icons.edit
+    }
+  ];
+
+  return `
+    <section class="section">
+      <h2>${icons.overview}<span>النظرة العامة</span></h2>
+      ${renderMetrics(metrics)}
+    </section>
+    <section class="section">
+      <h2>${icons.status}<span>آخر تحديثات البوت</span></h2>
+      ${renderItems(
+        [
+          { meta: `آخر تشغيل: ${escapeHtml(state.scheduler.lastRunAt || "لم يتم بعد")}`, text: state.scheduler.lastResult || "لا توجد نتيجة محفوظة بعد." },
+          { meta: "آخر خطأ", text: state.scheduler.lastError || "لا يوجد أي خطأ حاليًا." }
+        ],
+        "لا توجد تحديثات."
+      )}
+    </section>
+  `;
+}
+
+function buildTimingBody(state) {
+  const schedule = getScheduleSettings(state);
+  return `
+    ${renderFormSection({
+      title: "التحكم في وقت النشر",
+      icon: icons.clock,
+      action: "/dashboard/timing",
+      fields: [
+        renderField({ label: "الفاصل بين المنشورات بالدقائق", name: "intervalMinutes", type: "number", min: "1", max: "1440", value: schedule.intervalMinutes }),
+        renderField({ label: "تشغيل النشر التلقائي", name: "scheduleEnabled", type: "checkbox", checked: schedule.enabled })
+      ],
+      actions: ['<button class="btn btn-primary" type="submit">حفظ الوقت</button>'],
+      helper: "بعد الحفظ سيتم تحديث المؤقت فورًا دون الحاجة إلى إعادة تشغيل التطبيق."
+    })}
+    <section class="section">
+      <h2>${icons.clock}<span>ملخص الوقت</span></h2>
+      ${renderMetrics([
+        { label: "الحالة الحالية", value: schedule.enabled ? "مفعلة" : "متوقفة", level: schedule.enabled ? "good" : "warn", icon: icons.status },
+        { label: "الفاصل", value: `${schedule.intervalMinutes} دقيقة`, icon: icons.clock },
+        { label: "آخر تشغيل", value: state.scheduler.lastRunAt || "لم يتم بعد", icon: icons.status },
+        { label: "الموعد القادم", value: computeNextRunText(state), icon: icons.spark }
+      ])}
+    </section>
+  `;
+}
+
+function buildNextPostBody(state) {
+  const contentSettings = getEffectiveContentSettings(state);
+  return `
+    ${renderFormSection({
+      title: "إنشاء معاينة للمنشور التالي",
+      icon: icons.spark,
+      action: "/dashboard/next-post/generate",
+      fields: [],
+      actions: ['<button class="btn btn-primary" type="submit">توليد المنشور التالي</button>'],
+      helper: "يتم استعمال إعدادات المحتوى الحالية ومنشوراتك السابقة لتفادي التكرار."
+    })}
+    <section class="section">
+      <h2>${icons.spark}<span>المعاينة الحالية</span></h2>
+      ${renderItems(
+        state.preview.nextPost
+          ? [{
+              meta: `تم التوليد في: ${escapeHtml(state.preview.generatedAt || "-")} | اللغة: ${escapeHtml(contentSettings.contentLanguage)}`,
+              text: state.preview.nextPost
+            }]
+          : [],
+        state.preview.lastError || "لا توجد معاينة محفوظة بعد. اضغط زر التوليد لإنشاء المنشور التالي."
+      )}
+    </section>
+  `;
+}
+
+async function buildPostsBody(state) {
+  const connection = getResolvedPageConnection(state);
+  const posts = state.posts.slice(-12).reverse();
+  const enriched = await Promise.all(
+    posts.map(async (post) => {
+      try {
+        if (!connection.pageAccessToken) {
+          throw new Error("no token");
+        }
+
+        const details = await getPostDetails({
+          postId: post.id,
+          pageAccessToken: connection.pageAccessToken
+        });
+
+        return {
+          meta:
+            `النشر: ${escapeHtml(post.createdAt || details.created_time || "-")}` +
+            ` | التعليقات: ${escapeHtml(details.comments?.summary?.total_count ?? 0)}` +
+            ` | التفاعلات: ${escapeHtml(details.reactions?.summary?.total_count ?? 0)}` +
+            ` | الرابط: ${escapeHtml(details.permalink_url || "غير متوفر")}`,
+          text: post.message
+        };
+      } catch {
+        return {
+          meta: `النشر: ${escapeHtml(post.createdAt || "-")} | المعرف: ${escapeHtml(post.id || "-")}`,
+          text: post.message
+        };
+      }
+    })
   );
-  const currentHost = `${req.protocol}://${req.get("host")}`;
 
-  return renderShell({
-    title: "Dashboard | Facebook Page Auto Poster",
-    description: "لوحة تحكم احترافية للنشر التلقائي بالذكاء الاصطناعي على صفحتك.",
-    body: `
-      <main class="shell">
-        <section class="hero">
-          <div class="hero-head">
-            <div>
-              <div class="eyebrow">${icons.spark}<span>Gemini + Facebook Page Automation</span></div>
-              <h1>لوحة تحكم النشر التلقائي</h1>
-              <p>هذه اللوحة مقفولة على صفحتك فقط عبر <strong>FB_PAGE_ID</strong>، وتمنحك تحكمًا مباشرًا في وقت النشر وتشغيل منشور فوري عند الحاجة${isDirectMode ? " من دون خطوة ربط الصفحة." : "."}</p>
-            </div>
-            <div class="toolbar">
-              <span class="btn btn-ghost">${icons.page}<span>${isDirectMode ? "وضع مباشر مفعل" : "تحتاج توكن الصفحة"}</span></span>
-              <a class="btn btn-ghost" href="/status">${icons.status}<span>JSON</span></a>
-              <form method="post" action="/logout">
-                <button class="btn btn-ghost" type="submit">${icons.logout}<span>خروج</span></button>
-              </form>
-            </div>
-          </div>
-        </section>
+  return `
+    <section class="section">
+      <h2>${icons.posts}<span>المنشورات التي تم نشرها</span></h2>
+      ${renderItems(enriched, "لا توجد منشورات منشورة بعد.")}
+    </section>
+  `;
+}
 
-        <section class="grid">
-          <article class="card span-7">
-            <h2 class="card-title">${icons.status}<span>نظرة عامة</span></h2>
-            ${notice ? `<div class="notice">${escapeHtml(notice)}</div>` : ""}
-            ${error ? `<div class="error-box">${escapeHtml(error)}</div>` : ""}
-            ${
-              missing.length
-                ? `<div class="error-box">المتغيرات الناقصة: ${escapeHtml(missing.join(", "))}</div>`
-                : `<div class="notice">جميع المتغيرات الأساسية جاهزة.</div>`
-            }
-            <div class="metric-grid">
-              <div class="metric">
-                <div class="metric-label">${icons.clock}<span>حالة الجدولة</span></div>
-                <div class="metric-value">
-                  <span class="status-chip ${statusTone}">
-                    ${schedule.enabled ? (schedulerIsActive() ? "نشطة" : "تحتاج إعادة ربط") : "متوقفة"}
-                  </span>
-                </div>
-                <div class="metric-note">${
-                  schedule.enabled
-                    ? escapeHtml(schedulerSnapshot.expression || `*/${schedule.intervalMinutes} * * * *`)
-                    : "تم إيقاف النشر التلقائي من الداشبورد"
-                }</div>
-              </div>
-              <div class="metric">
-                <div class="metric-label">${icons.clock}<span>وقت النشر</span></div>
-                <div class="metric-value">كل ${escapeHtml(schedule.intervalMinutes)} دقيقة</div>
-                <div class="metric-note">المنطقة الزمنية: ${escapeHtml(config.timezone)}</div>
-              </div>
-              <div class="metric">
-                <div class="metric-label">${icons.page}<span>الصفحة المستهدفة</span></div>
-                <div class="metric-value">${escapeHtml(connectedConfiguredPage || (isDirectMode ? "جاهزة عبر التوكن المباشر" : "غير مربوطة بعد"))}</div>
-                <div class="metric-note">FB_PAGE_ID: ${escapeHtml(config.facebookPageId || "غير مضبوط")} | ${isDirectMode ? "Direct Token" : "OAuth"}</div>
-              </div>
-              <div class="metric">
-                <div class="metric-label">${icons.spark}<span>الذكاء الاصطناعي</span></div>
-                <div class="metric-value">${escapeHtml(getActiveAiModel())}</div>
-                <div class="metric-note">المزوّد: ${escapeHtml(config.aiProvider)}</div>
-              </div>
-            </div>
-          </article>
+async function buildAudienceBody(state) {
+  const connection = getResolvedPageConnection(state);
+  if (!connection.pageAccessToken || !state.posts.length) {
+    return `
+      <section class="section">
+        <h2>${icons.people}<span>الأشخاص المتفاعلون</span></h2>
+        <div class="empty">لا توجد بيانات تفاعل بعد. بعد نشر منشورات ووجود تعليقات سيظهر الأشخاص هنا.</div>
+      </section>
+    `;
+  }
 
-          <article class="card span-5">
-            <h2 class="card-title">${icons.shield}<span>الدخول والحماية</span></h2>
-            <p class="muted">الدخول إلى هذه اللوحة محمي بكود ثابت، والعمليات الحساسة مثل النشر اليدوي وتعديل الوقت لا تعمل إلا بعد فتح الداشبورد.</p>
-            <div class="metric-grid">
-              <div class="metric">
-                <div class="metric-label">${icons.link}<span>الرابط الحالي</span></div>
-                <div class="metric-value">${escapeHtml(currentHost)}</div>
-                <div class="metric-note">${isDirectMode ? "البوت سيعمل مباشرة عند التشغيل" : `Callback: ${escapeHtml(`${config.baseUrl}/auth/facebook/callback`)}`}</div>
-              </div>
-              <div class="metric">
-                <div class="metric-label">${icons.page}<span>هوية الصفحة</span></div>
-                <div class="metric-value">${escapeHtml(config.facebookPageId || "غير مضبوط")}</div>
-                <div class="metric-note">لن يقبل التطبيق أي صفحة مختلفة عن هذا المعرّف</div>
-              </div>
-            </div>
-          </article>
+  const recentPosts = state.posts.slice(-8);
+  const commentGroups = await Promise.all(
+    recentPosts.map(async (post) => {
+      try {
+        return await getPostComments({
+          postId: post.id,
+          pageAccessToken: connection.pageAccessToken,
+          limit: 15
+        });
+      } catch {
+        return [];
+      }
+    })
+  );
 
-          <article class="card span-4">
-            <h2 class="card-title">${icons.clock}<span>التحكم في الوقت</span></h2>
-            <form method="post" action="/settings/schedule">
-              <div class="form-grid">
-                <div>
-                  <label for="intervalMinutes">الفاصل بين المنشورات بالدقائق</label>
-                  <input id="intervalMinutes" name="intervalMinutes" type="number" min="1" max="1440" value="${escapeHtml(schedule.intervalMinutes)}" required />
-                </div>
-              </div>
-              <div class="toggle" style="margin-top:16px;">
-                <input id="scheduleEnabled" name="scheduleEnabled" type="checkbox" ${schedule.enabled ? "checked" : ""} />
-                <label for="scheduleEnabled" style="margin:0;">تشغيل النشر التلقائي على حسب هذا الوقت</label>
-              </div>
-              <div class="inline-actions">
-                <button class="btn btn-primary" type="submit">${icons.clock}<span>حفظ الوقت</span></button>
-              </div>
-            </form>
-          </article>
+  const audience = new Map();
+  for (const comments of commentGroups) {
+    for (const comment of comments) {
+      const person = comment.from;
+      if (!person?.id || !person?.name) {
+        continue;
+      }
 
-          <article class="card span-4">
-            <h2 class="card-title">${icons.page}<span>وضع الصفحة</span></h2>
-            <p class="muted">${
-              isDirectMode
-                ? "بوجود FB_PAGE_ACCESS_TOKEN لن تحتاج إلى ربط Facebook من الداشبورد. يكفي تشغيل البوت وسيستخدم التوكن المباشر للنشر على صفحتك."
-                : "أضف FB_PAGE_ACCESS_TOKEN في Railway ليعمل البوت مباشرة على صفحتك المحددة في FB_PAGE_ID."
-            }</p>
-            ${
-              isDirectMode
-                ? `<p class="muted">التوكن المباشر مفعل الآن، وآخر ربط محفوظ: ${escapeHtml(state.facebook.lastAuthAt || "غير مطلوب في هذا الوضع")}</p>`
-                : `<p class="muted">التوكن المباشر غير موجود بعد، لذلك لن يبدأ النشر التلقائي حتى تضيفه.</p><p class="muted">آخر ربط محفوظ: ${escapeHtml(state.facebook.lastAuthAt || "لم يتم بعد")}</p>`
-            }
-          </article>
+      const current = audience.get(person.id) || {
+        name: person.name,
+        count: 0,
+        latestAt: "",
+        lastMessage: ""
+      };
 
-          <article class="card span-4">
-            <h2 class="card-title">${icons.play}<span>تشغيل سريع</span></h2>
-            <p class="muted">يمكنك اختبار النشر فورًا للتأكد من أن الربط وGemini يعملان بشكل صحيح قبل انتظار الدورة التالية.</p>
-            <div class="inline-actions">
-              <a class="btn btn-secondary" href="/run-once">${icons.play}<span>نشر الآن</span></a>
-            </div>
-            <p class="muted">آخر نتيجة: ${escapeHtml(state.scheduler.lastResult || "لا توجد بعد")}</p>
-            <p class="muted">آخر خطأ: ${escapeHtml(state.scheduler.lastError || "لا يوجد")}</p>
-          </article>
+      current.count += 1;
+      current.latestAt = comment.created_time || current.latestAt;
+      current.lastMessage = comment.message || current.lastMessage;
+      audience.set(person.id, current);
+    }
+  }
 
-          <article class="card span-8">
-            <h2 class="card-title">${icons.spark}<span>آخر المنشورات المولدة</span></h2>
-            ${
-              recentPosts.length
-                ? `<div class="list">${recentPosts
-                    .map(
-                      (post) => `
-                        <article class="post-item">
-                          <div class="post-meta">تم الإنشاء: ${escapeHtml(post.createdAt || "-")} | معرف المنشور: ${escapeHtml(post.id || "-")}</div>
-                          <pre class="post-body">${escapeHtml(post.message || "")}</pre>
-                        </article>
-                      `
-                    )
-                    .join("")}</div>`
-                : `<p class="muted">لا توجد منشورات محفوظة بعد. بعد أول عملية نشر ستظهر هنا المسودات التي تم إنشاؤها وإرسالها.</p>`
-            }
-          </article>
+  const topPeople = [...audience.values()]
+    .sort((a, b) => b.count - a.count || String(b.latestAt).localeCompare(String(a.latestAt)))
+    .slice(0, 15);
 
-          <article class="card span-4">
-            <h2 class="card-title">${icons.status}<span>آخر نشاط</span></h2>
-            <div class="metric-grid">
-              <div class="metric">
-                <div class="metric-label">${icons.clock}<span>آخر تشغيل</span></div>
-                <div class="metric-value">${escapeHtml(state.scheduler.lastRunAt || "لم يتم بعد")}</div>
-              </div>
-              <div class="metric">
-                <div class="metric-label">${icons.status}<span>الرابط العام</span></div>
-                <div class="metric-value">${escapeHtml(config.baseUrl)}</div>
-                <div class="metric-note">مناسب لـ Railway وMeta Callback</div>
-              </div>
-            </div>
-          </article>
-        </section>
-      </main>
-    `
-  });
+  return `
+    <section class="section">
+      <h2>${icons.people}<span>الأشخاص المتفاعلون</span></h2>
+      ${renderMetrics([
+        { label: "إجمالي الأشخاص", value: String(topPeople.length), icon: icons.people },
+        { label: "المنشورات المفحوصة", value: String(recentPosts.length), icon: icons.posts },
+        { label: "مصدر البيانات", value: "تعليقات أحدث المنشورات", icon: icons.status }
+      ])}
+    </section>
+    <section class="section">
+      <h2>${icons.people}<span>أحدث المتفاعلين</span></h2>
+      ${renderItems(
+        topPeople.map((person) => ({
+          meta: `عدد التعليقات: ${escapeHtml(person.count)} | آخر تفاعل: ${escapeHtml(person.latestAt || "-")}`,
+          text: `${person.name}\n\nآخر تعليق:\n${person.lastMessage || "لا توجد رسالة مكتوبة."}`
+        })),
+        "لم يتم العثور على تعليقات بأسماء أشخاص حتى الآن."
+      )}
+    </section>
+  `;
+}
+
+function buildContentBody(state) {
+  const contentSettings = getEffectiveContentSettings(state);
+  const usingDashboardOverride = Boolean(state.settings.contentBrief || state.settings.contentLanguage);
+
+  return `
+    ${renderFormSection({
+      title: "تغيير محتوى المنشورات",
+      icon: icons.edit,
+      action: "/dashboard/content",
+      fields: [
+        renderField({ label: "لغة المنشورات", name: "contentLanguage", value: contentSettings.contentLanguage }),
+        renderField({ label: "تعليمات المحتوى", name: "contentBrief", type: "textarea", value: contentSettings.contentBrief, rows: 10 })
+      ],
+      actions: [
+        '<button class="btn btn-primary" type="submit">حفظ المحتوى</button>',
+        '<button class="btn btn-secondary" type="submit" name="resetContent" value="1">العودة إلى القيم الأصلية</button>'
+      ],
+      helper: "هذا النص هو الذي يوجّه Gemini لصياغة المنشورات القادمة."
+    })}
+    <section class="section">
+      <h2>${icons.edit}<span>المصدر الحالي للمحتوى</span></h2>
+      ${renderMetrics([
+        { label: "المصدر", value: usingDashboardOverride ? "إعدادات الداشبورد" : "متغيرات Railway", level: usingDashboardOverride ? "good" : "warn", icon: icons.status },
+        { label: "اللغة", value: contentSettings.contentLanguage, icon: icons.edit },
+        { label: "عدد الحروف", value: String(contentSettings.contentBrief.length), icon: icons.edit }
+      ])}
+    </section>
+  `;
+}
+
+async function buildSectionView(sectionKey, state) {
+  switch (sectionKey) {
+    case "overview":
+      return {
+        pageTitle: "نظرة عامة",
+        pageDescription: "ملخص سريع لحالة البوت، وقت النشر، الصفحة المستهدفة، وآخر النتائج.",
+        body: await buildOverviewBody(state)
+      };
+    case "timing":
+      return {
+        pageTitle: "التحكم في الوقت",
+        pageDescription: "تغيير الفاصل الزمني بين المنشورات وتشغيل أو إيقاف الجدولة من داخل الداشبورد.",
+        body: buildTimingBody(state)
+      };
+    case "next-post":
+      return {
+        pageTitle: "المنشور التالي",
+        pageDescription: "إنشاء معاينة للمنشور التالي قبل موعد النشر التلقائي.",
+        body: buildNextPostBody(state)
+      };
+    case "posts":
+      return {
+        pageTitle: "المنشورات التي تم نشرها",
+        pageDescription: "مراجعة آخر المنشورات التي نشرها البوت مع بياناتها الأساسية.",
+        body: await buildPostsBody(state)
+      };
+    case "audience":
+      return {
+        pageTitle: "الأشخاص المتفاعلون",
+        pageDescription: "عرض الأشخاص الذين علقوا على أحدث المنشورات المنشورة بواسطة البوت.",
+        body: await buildAudienceBody(state)
+      };
+    case "content":
+      return {
+        pageTitle: "تغيير محتوى المنشورات",
+        pageDescription: "تعديل لغة وتعليمات المحتوى التي تُرسل إلى Gemini مباشرة من الواجهة.",
+        body: buildContentBody(state)
+      };
+    default:
+      return null;
+  }
+}
+
+async function renderSection(req, res, sectionKey) {
+  const state = readState();
+  const section = await buildSectionView(sectionKey, state);
+  if (!section) {
+    res.status(404).send("Dashboard section not found.");
+    return;
+  }
+
+  res.type("html").send(
+    renderDashboardPage({
+      sectionKey,
+      pageTitle: section.pageTitle,
+      pageDescription: section.pageDescription,
+      body: section.body,
+      notice: String(req.query.notice || ""),
+      error: String(req.query.error || "")
+    })
+  );
 }
 
 syncScheduler();
 
+app.get("/", (req, res) => {
+  if (isDashboardAuthenticated(req)) {
+    res.redirect("/dashboard/overview");
+    return;
+  }
+
+  res.type("html").send(
+    renderLoginPage({
+      notice: String(req.query.notice || ""),
+      error: String(req.query.error || "")
+    })
+  );
+});
+
 app.get("/login", (req, res) => {
   if (isDashboardAuthenticated(req)) {
-    redirectWithMessage(res, "/", {
-      notice: "الداشبورد مفتوح بالفعل."
-    });
+    res.redirect("/dashboard/overview");
     return;
   }
 
@@ -909,83 +700,42 @@ app.get("/login", (req, res) => {
 });
 
 app.post("/login", (req, res) => {
-  const accessCode = String(req.body.accessCode || "").trim();
-
-  if (accessCode !== config.dashboardAccessCode) {
-    redirectWithMessage(res, "/login", {
-      error: "الكود غير صحيح."
-    });
+  if (String(req.body.accessCode || "").trim() !== config.dashboardAccessCode) {
+    res.type("html").send(renderLoginPage({ error: "الكود غير صحيح." }));
     return;
   }
 
   setDashboardSession(res);
-  redirectWithMessage(res, "/", {
-    notice: "تم فتح الداشبورد بنجاح."
-  });
+  res.redirect("/dashboard/overview");
 });
 
 app.post("/logout", ensureDashboardAuth, (req, res) => {
   clearDashboardSession(res);
-  redirectWithMessage(res, "/login", {
-    notice: "تم تسجيل الخروج من الداشبورد."
+  redirectWithMessage(res, "/", {
+    notice: "تم تسجيل الخروج بنجاح."
   });
 });
 
-app.get("/", ensureDashboardAuth, (req, res) => {
-  res.type("html").send(
-    renderDashboard({
-      req,
-      state: readState(),
-      notice: String(req.query.notice || ""),
-      error: String(req.query.error || "")
-    })
-  );
+app.get("/dashboard", ensureDashboardAuth, (req, res) => {
+  res.redirect("/dashboard/overview");
 });
 
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    uptime: process.uptime()
-  });
+app.get("/dashboard/:section", ensureDashboardAuth, async (req, res) => {
+  const sectionKey = String(req.params.section || "");
+  if (!sectionExists(sectionKey)) {
+    res.status(404).send("Dashboard section not found.");
+    return;
+  }
+
+  await renderSection(req, res, sectionKey);
 });
 
-app.get("/status", ensureDashboardAuth, (req, res) => {
-  const state = readState();
-  const schedule = getScheduleSettings(state);
-  const missing = getMissingCoreConfig();
-  const pageConnection = getResolvedPageConnection(state);
-
-  res.json({
-    ok: true,
-    baseUrl: config.baseUrl,
-    stateDir: config.stateDir,
-    aiProvider: config.aiProvider,
-    aiModel: getActiveAiModel(),
-    configuredPageId: config.facebookPageId,
-    directPageTokenConfigured: hasDirectPageAccessToken(),
-    schedule,
-    scheduler: getSchedulerSnapshot(),
-    connectedPage: pageConnection.pageAccessToken
-      ? {
-          id: config.facebookPageId,
-          name: pageConnection.pageName,
-          mode: pageConnection.mode
-        }
-      : null,
-    missingEnv: missing,
-    lastRunAt: state.scheduler.lastRunAt,
-    lastResult: state.scheduler.lastResult,
-    lastError: state.scheduler.lastError,
-    recentPosts: state.posts.slice(-5)
-  });
-});
-
-app.post("/settings/schedule", ensureDashboardAuth, (req, res) => {
+app.post("/dashboard/timing", ensureDashboardAuth, (req, res) => {
   const intervalMinutes = Number.parseInt(String(req.body.intervalMinutes || ""), 10);
   const enabled = req.body.scheduleEnabled === "on";
 
   if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 1440) {
-    redirectWithMessage(res, "/", {
+    redirectWithMessage(res, "/dashboard/timing", {
       error: "وقت النشر يجب أن يكون رقمًا بين 1 و 1440 دقيقة."
     });
     return;
@@ -998,17 +748,81 @@ app.post("/settings/schedule", ensureDashboardAuth, (req, res) => {
   });
 
   syncScheduler();
+  redirectWithMessage(res, "/dashboard/timing", {
+    notice: enabled ? `تم حفظ الوقت على كل ${intervalMinutes} دقيقة.` : "تم إيقاف الجدولة."
+  });
+});
 
-  redirectWithMessage(res, "/", {
-    notice: enabled
-      ? `تم حفظ وقت النشر على كل ${intervalMinutes} دقيقة.`
-      : "تم إيقاف النشر التلقائي من الداشبورد."
+app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
+  updateState((current) => {
+    if (req.body.resetContent === "1") {
+      current.settings.contentBrief = "";
+      current.settings.contentLanguage = "";
+    } else {
+      current.settings.contentBrief = String(req.body.contentBrief || "").trim();
+      current.settings.contentLanguage = String(req.body.contentLanguage || "").trim();
+    }
+    return current;
+  });
+
+  redirectWithMessage(res, "/dashboard/content", {
+    notice: req.body.resetContent === "1" ? "تمت العودة إلى القيم الأصلية." : "تم حفظ محتوى المنشورات الجديد."
+  });
+});
+
+app.post("/dashboard/next-post/generate", ensureDashboardAuth, async (req, res) => {
+  try {
+    await generatePreviewPost();
+    redirectWithMessage(res, "/dashboard/next-post", {
+      notice: "تم توليد المنشور التالي بنجاح."
+    });
+  } catch (error) {
+    updateState((current) => {
+      current.preview.lastError = normalizeErrorMessage(error);
+      return current;
+    });
+    redirectWithMessage(res, "/dashboard/next-post", {
+      error: normalizeErrorMessage(error)
+    });
+  }
+});
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true, uptime: process.uptime() });
+});
+
+app.get("/status", ensureDashboardAuth, (req, res) => {
+  const state = readState();
+  const connection = getResolvedPageConnection(state);
+  res.json({
+    ok: true,
+    baseUrl: config.baseUrl,
+    aiProvider: config.aiProvider,
+    aiModel: getActiveAiModel(),
+    configuredPageId: config.facebookPageId,
+    directPageTokenConfigured: hasDirectPageAccessToken(),
+    schedule: getScheduleSettings(state),
+    scheduler: getSchedulerSnapshot(),
+    connectedPage: connection.pageAccessToken
+      ? {
+          id: connection.pageId,
+          name: connection.pageName,
+          mode: connection.mode
+        }
+      : null,
+    settings: getEffectiveContentSettings(state),
+    preview: state.preview,
+    missingEnv: getMissingCoreConfig(),
+    lastRunAt: state.scheduler.lastRunAt,
+    lastResult: state.scheduler.lastResult,
+    lastError: state.scheduler.lastError,
+    posts: state.posts.slice(-10)
   });
 });
 
 app.get("/auth/facebook/start", ensureDashboardAuth, (req, res) => {
   if (hasDirectPageAccessToken()) {
-    redirectWithMessage(res, "/", {
+    redirectWithMessage(res, "/dashboard/overview", {
       notice: "الوضع المباشر مفعل بالفعل عبر FB_PAGE_ACCESS_TOKEN."
     });
     return;
@@ -1025,34 +839,24 @@ app.get("/auth/facebook/start", ensureDashboardAuth, (req, res) => {
 
 app.get("/auth/facebook/callback", ensureDashboardAuth, async (req, res) => {
   if (hasDirectPageAccessToken()) {
-    redirectWithMessage(res, "/", {
+    redirectWithMessage(res, "/dashboard/overview", {
       notice: "تم تجاوز Facebook Login لأن FB_PAGE_ACCESS_TOKEN مفعل."
     });
     return;
   }
 
   try {
-    const code = req.query.code;
+    const code = String(req.query.code || "");
     if (!code) {
       throw new Error("Facebook did not return an authorization code.");
     }
 
-    const userAccessToken = await exchangeCodeForLongLivedUserToken(
-      String(code),
-      config.baseUrl
-    );
+    const userAccessToken = await exchangeCodeForLongLivedUserToken(code, config.baseUrl);
     const pages = await getManagedPages(userAccessToken);
-
-    if (!pages.length) {
-      throw new Error("No managed Facebook Pages were found for this account.");
-    }
-
     const matchingPage = pages.find((page) => page.id === config.facebookPageId);
 
     if (!matchingPage) {
-      throw new Error(
-        `The configured FB_PAGE_ID (${config.facebookPageId}) is not managed by this Facebook account.`
-      );
+      throw new Error(`The configured FB_PAGE_ID (${config.facebookPageId}) is not managed by this Facebook account.`);
     }
 
     updateState((current) => {
@@ -1065,12 +869,12 @@ app.get("/auth/facebook/callback", ensureDashboardAuth, async (req, res) => {
       return current;
     });
 
-    redirectWithMessage(res, "/", {
+    redirectWithMessage(res, "/dashboard/overview", {
       notice: `تم ربط صفحة ${matchingPage.name} بنجاح.`
     });
   } catch (error) {
-    redirectWithMessage(res, "/", {
-      error: `فشل ربط Facebook: ${error.message}`
+    redirectWithMessage(res, "/dashboard/overview", {
+      error: normalizeErrorMessage(error)
     });
   }
 });
@@ -1085,7 +889,6 @@ async function maybeRunStartupPost() {
 
   const lastRunAt = state.scheduler.lastRunAt ? new Date(state.scheduler.lastRunAt).getTime() : 0;
   const minDelayMs = schedule.intervalMinutes * 60 * 1000;
-
   if (lastRunAt && Number.isFinite(lastRunAt) && Date.now() - lastRunAt < minDelayMs) {
     return;
   }
@@ -1096,40 +899,34 @@ async function maybeRunStartupPost() {
   } catch (error) {
     updateState((current) => {
       current.scheduler.lastRunAt = new Date().toISOString();
-      current.scheduler.lastError = error.message;
+      current.scheduler.lastError = normalizeErrorMessage(error);
       return current;
     });
-    console.error("[startup] failed:", error.message);
+    console.error("[startup] failed:", normalizeErrorMessage(error));
   }
 }
 
 app.get("/run-once", ensureDashboardAuth, async (req, res) => {
   try {
     const result = await runPostingJob();
-    res.json({
-      ok: true,
-      ...result
-    });
+    res.json({ ok: true, ...result });
   } catch (error) {
+    const message = normalizeErrorMessage(error);
     updateState((current) => {
       current.scheduler.lastRunAt = new Date().toISOString();
-      current.scheduler.lastError = error.message;
+      current.scheduler.lastError = message;
       return current;
     });
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: message });
   }
 });
 
-app.listen(config.port, () => {
-  const schedule = getScheduleSettings();
+app.listen(config.port, async () => {
   console.log(`Server listening on port ${config.port}`);
   console.log(`Public base URL ${config.baseUrl}`);
-  console.log(`Dashboard code protected on /login`);
-  console.log(`Scheduler active: ${schedule.enabled ? "yes" : "no"}`);
+  console.log("Dashboard login available on /");
   if (hasDirectPageAccessToken()) {
+    await refreshDirectPageProfile();
     console.log(`Direct page token mode enabled for page ${config.facebookPageId}`);
     void maybeRunStartupPost();
   }

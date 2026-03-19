@@ -11,6 +11,15 @@ const defaultState = {
     lastAuthAt: ""
   },
   posts: [],
+  preview: {
+    nextPost: "",
+    generatedAt: "",
+    lastError: ""
+  },
+  settings: {
+    contentBrief: "",
+    contentLanguage: ""
+  },
   scheduler: {
     enabled: true,
     intervalMinutes: config.postIntervalMinutes,
@@ -37,6 +46,14 @@ export function readState() {
         ...(parsed.facebook || {})
       },
       posts: Array.isArray(parsed.posts) ? parsed.posts : [],
+      preview: {
+        ...structuredClone(defaultState.preview),
+        ...(parsed.preview || {})
+      },
+      settings: {
+        ...structuredClone(defaultState.settings),
+        ...(parsed.settings || {})
+      },
       scheduler: {
         ...structuredClone(defaultState.scheduler),
         ...(parsed.scheduler || {})
