@@ -6,7 +6,7 @@ import {
   getManagedPages,
   publishPagePost
 } from "./facebook.js";
-import { generatePost } from "./openai.js";
+import { generatePost, getActiveAiModel } from "./ai.js";
 import { startScheduler, schedulerIsActive } from "./scheduler.js";
 import { readState, updateState } from "./storage.js";
 
@@ -124,6 +124,8 @@ app.get("/", (req, res) => {
         <li>الجدولة: ${schedulerIsActive() ? "مفعلة" : "متوقفة"}</li>
         <li>التكرار: ${escapeHtml(cronExpression)}</li>
         <li>الرابط العام: ${escapeHtml(config.baseUrl)}</li>
+        <li>مزود الذكاء الاصطناعي: ${escapeHtml(config.aiProvider)}</li>
+        <li>الموديل: ${escapeHtml(getActiveAiModel())}</li>
         <li>الصفحة المختارة: ${escapeHtml(state.facebook.pageName || "غير محددة بعد")}</li>
         <li>آخر تشغيل: ${escapeHtml(state.scheduler.lastRunAt || "لم يتم بعد")}</li>
         <li>آخر نتيجة: ${escapeHtml(state.scheduler.lastResult || "لا توجد")}</li>
@@ -161,6 +163,8 @@ app.get("/status", (req, res) => {
     ok: true,
     baseUrl: config.baseUrl,
     stateDir: config.stateDir,
+    aiProvider: config.aiProvider,
+    aiModel: getActiveAiModel(),
     schedulerActive: schedulerIsActive(),
     connectedPage: state.facebook.pageId
       ? {

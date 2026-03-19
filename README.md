@@ -2,7 +2,7 @@
 
 هذا المشروع ينشئ بوت Node.js للنشر التلقائي إلى **Facebook Page** كل 10 دقائق باستخدام:
 
-- OpenAI لتوليد نص المنشور
+- OpenAI أو Gemini لتوليد نص المنشور
 - Meta Graph API للنشر الرسمي
 - Facebook Login لربط الحساب واختيار الصفحة
 
@@ -15,6 +15,9 @@
 - https://developers.facebook.com/docs/pages-api/posts/
 - https://developers.facebook.com/docs/permissions/
 - https://developers.facebook.com/docs/sharing/reference/feed-dialog
+- https://ai.google.dev/models/gemini
+- https://ai.google.dev/gemini-api/docs/text-generation
+- https://ai.google.dev/tutorials/embed_node_quickstart
 - https://platform.openai.com/docs/libraries/node-js-library
 - https://platform.openai.com/docs/api-reference/responses
 
@@ -32,13 +35,17 @@ copy .env.example .env
 
 ثم عدل القيم التالية داخل `.env`:
 
-- `OPENAI_API_KEY`
+- `AI_PROVIDER`
 - `FB_APP_ID`
 - `FB_APP_SECRET`
 - `CONTENT_BRIEF`
 
 اختياري:
 
+- `OPENAI_API_KEY` إذا كان `AI_PROVIDER=openai`
+- `OPENAI_MODEL`
+- `GEMINI_API_KEY` إذا كان `AI_PROVIDER=gemini`
+- `GEMINI_MODEL`
 - `BASE_URL` إذا أردت تحديد الدومين يدويًا
 - `STATE_DIR` لتحديد مسار ملف الحالة
 - `FB_PAGE_ID` إذا أردت تثبيت صفحة معيّنة تلقائيًا
@@ -87,6 +94,8 @@ http://localhost:3000/run-once
 - لا تضع هذا الملف في Git
 - إذا انتهت صلاحية الربط، أعد تسجيل الدخول من `/auth/facebook/start`
 - عدل `CONTENT_BRIEF` ليصبح المحتوى مناسبًا لمجالك بدل المنشورات العامة
+- إذا استخدمت Gemini، ضع `AI_PROVIDER=gemini`
+- بحسب وثائق Google الحالية في 19 مارس 2026، Gemini 3 متاح ضمن Gemini API، وبعض نماذجه ما تزال بصيغة Preview
 
 ## 7. النشر على GitHub
 
