@@ -432,7 +432,7 @@ const sections = [
   { key: "overview", label: "نظرة عامة", icon: icons.overview },
   { key: "timing", label: "التحكم في الوقت", icon: icons.clock },
   { key: "next-post", label: "المنشور التالي", icon: icons.spark },
-  { key: "posts", label: "المنشورات التي تم نشرها", icon: icons.posts },
+  { key: "posts", label: "المنشورات التي تمت نشرها", icon: icons.posts },
   { key: "audience", label: "الأشخاص المتفاعلون", icon: icons.people },
   { key: "content", label: "إدارة المنشورات", icon: icons.edit }
 ];

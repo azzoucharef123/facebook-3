@@ -199,6 +199,30 @@ function getQueuedPosts(state = readState()) {
   return Array.isArray(state.queuedPosts) ? state.queuedPosts : [];
 }
 
+function renderQueuedPostsList(queuedPosts) {
+  if (!queuedPosts.length) {
+    return `<div class="empty">لا توجد منشورات مبرمجة بعد. ألصق نصك بين @ و @ لإضافة أي عدد تريده.</div>`;
+  }
+
+  return `<div class="queue-list">
+    ${queuedPosts
+      .map(
+        (post, index) => `
+          <article class="queue-card">
+            <div class="queue-head">
+              <span class="queue-number">#${index + 1} <small>المعرف ${escapeHtml(post.id)}</small></span>
+              <form method="post" action="/dashboard/content/delete/${encodeURIComponent(post.id)}">
+                <button class="queue-delete" type="submit">x</button>
+              </form>
+            </div>
+            <pre class="queue-text">${escapeHtml(post.text)}</pre>
+          </article>
+        `
+      )
+      .join("")}
+  </div>`;
+}
+
 function getNextQueuedPost(state = readState()) {
   return getQueuedPosts(state)[0] || null;
 }
@@ -311,7 +335,7 @@ function renderQueuedPostsEditor(state) {
   return `
     <section class="section">
       <h2>${icons.edit}<span>إضافة منشورات جديدة</span></h2>
-      <form method="post" action="/dashboard/content">
+      <form id="bulkPostsForm" method="post" action="/dashboard/content">
         ${renderField({
           label: "ألصق هنا نصًا كبيرًا، وكل جزء بين @ و @ سيتم اعتباره منشورًا مستقلاً.",
           name: "bulkText",
@@ -324,30 +348,85 @@ function renderQueuedPostsEditor(state) {
         </div>
       </form>
     </section>
+    <div class="modal-backdrop" id="contentResultModal" aria-hidden="true">
+      <div class="modal">
+        <h3 id="contentResultTitle">تمت العملية</h3>
+        <p id="contentResultMessage">تم تحديث القائمة.</p>
+        <div class="modal-actions">
+          <button class="btn btn-primary" type="button" id="contentResultOk">موافق</button>
+        </div>
+      </div>
+    </div>
     <section class="section">
       <h2>${icons.posts}<span>المنشورات المبرمجة للنشر</span></h2>
-      ${
-        queuedPosts.length
-          ? `<div class="queue-list">
-              ${queuedPosts
-                .map(
-                  (post, index) => `
-                    <article class="queue-card">
-                      <div class="queue-head">
-                        <span class="queue-number">#${index + 1} <small>المعرف ${escapeHtml(post.id)}</small></span>
-                        <form method="post" action="/dashboard/content/delete/${encodeURIComponent(post.id)}">
-                          <button class="queue-delete" type="submit">x</button>
-                        </form>
-                      </div>
-                      <pre class="queue-text">${escapeHtml(post.text)}</pre>
-                    </article>
-                  `
-                )
-                .join("")}
-            </div>`
-          : `<div class="empty">لا توجد منشورات مبرمجة بعد. ألصق نصك بين @ و @ لإضافة أي عدد تريده.</div>`
-      }
+      <div id="queuedPostsContainer">${renderQueuedPostsList(queuedPosts)}</div>
     </section>
+    <script>
+      (() => {
+        const form = document.getElementById("bulkPostsForm");
+        const modal = document.getElementById("contentResultModal");
+        const title = document.getElementById("contentResultTitle");
+        const message = document.getElementById("contentResultMessage");
+        const okButton = document.getElementById("contentResultOk");
+        const queuedPostsContainer = document.getElementById("queuedPostsContainer");
+
+        if (!form || !modal || !title || !message || !okButton || !queuedPostsContainer) {
+          return;
+        }
+
+        const textarea = form.querySelector('textarea[name="bulkText"]');
+
+        const openModal = (nextTitle, nextMessage) => {
+          title.textContent = nextTitle;
+          message.textContent = nextMessage;
+          modal.classList.add("open");
+          modal.setAttribute("aria-hidden", "false");
+        };
+
+        const closeModal = () => {
+          modal.classList.remove("open");
+          modal.setAttribute("aria-hidden", "true");
+        };
+
+        okButton.addEventListener("click", closeModal);
+        modal.addEventListener("click", (event) => {
+          if (event.target === modal) {
+            closeModal();
+          }
+        });
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+
+          const formData = new FormData(form);
+
+          try {
+            const response = await fetch(form.action, {
+              method: "POST",
+              headers: {
+                Accept: "application/json"
+              },
+              body: new URLSearchParams(formData)
+            });
+
+            const payload = await response.json();
+
+            if (!response.ok || !payload.ok) {
+              openModal("تعذر إضافة المنشورات", payload.error || "حدث خطأ أثناء إضافة المنشورات.");
+              return;
+            }
+
+            queuedPostsContainer.innerHTML = payload.queueHtml || "";
+            if (textarea) {
+              textarea.value = "";
+            }
+            openModal("تمت إضافة المنشورات", payload.message || "تمت العملية بنجاح.");
+          } catch (error) {
+            openModal("تعذر إضافة المنشورات", "تعذر الاتصال بالخادم. حاول مرة أخرى.");
+          }
+        });
+      })();
+    </script>
   `;
 }
 
@@ -533,7 +612,7 @@ async function buildPostsBody(state) {
 
   return `
     <section class="section">
-      <h2>${icons.posts}<span>المنشورات التي تم نشرها</span></h2>
+      <h2>${icons.posts}<span>المنشورات التي تمت نشرها</span></h2>
       ${renderItems(enriched, "لا توجد منشورات منشورة بعد.")}
     </section>
   `;
@@ -639,7 +718,7 @@ async function buildSectionView(sectionKey, state) {
       };
     case "posts":
       return {
-        pageTitle: "المنشورات التي تم نشرها",
+        pageTitle: "المنشورات التي تمت نشرها",
         pageDescription: "مراجعة آخر المنشورات التي نشرها البوت.",
         body: await buildPostsBody(state)
       };
@@ -765,15 +844,24 @@ app.post("/dashboard/timing", ensureDashboardAuth, (req, res) => {
 app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
   const bulkText = String(req.body.bulkText || "");
   const posts = parseQueuedPosts(bulkText);
+  const wantsJson = (req.headers.accept || "").includes("application/json");
 
   if (!posts.length) {
+    if (wantsJson) {
+      res.status(400).json({
+        ok: false,
+        error: "لم يتم العثور على منشورات بين الرمز @ والرمز @."
+      });
+      return;
+    }
+
     redirectWithMessage(res, "/dashboard/content", {
       error: "لم يتم العثور على منشورات بين الرمز @ والرمز @."
     });
     return;
   }
 
-  updateState((current) => {
+  const nextState = updateState((current) => {
     for (const text of posts) {
       current.queueCounter += 1;
       current.queuedPosts.push({
@@ -784,6 +872,15 @@ app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
     }
     return current;
   });
+
+  if (wantsJson) {
+    res.json({
+      ok: true,
+      message: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`,
+      queueHtml: renderQueuedPostsList(getQueuedPosts(nextState))
+    });
+    return;
+  }
 
   redirectWithMessage(res, "/dashboard/content", {
     notice: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`
