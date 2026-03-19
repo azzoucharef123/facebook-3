@@ -697,7 +697,7 @@ function renderLoginPage({ notice = "", error = "" } = {}) {
         <section class="auth-card">
           <div class="eyebrow">${icons.lock}<span>Dashboard Access</span></div>
           <h1>دخول الداشبورد</h1>
-          <p>أدخل كود الحماية لفتح لوحة التحكم الخاصة بالنشر، وربط الصفحة، وضبط وقت الجدولة.</p>
+          <p>أدخل كود الحماية لفتح لوحة التحكم الخاصة بالنشر، وضبط وقت الجدولة، ومتابعة حالة الصفحة.</p>
           ${notice ? `<div class="notice">${escapeHtml(notice)}</div>` : ""}
           ${error ? `<div class="error-box">${escapeHtml(error)}</div>` : ""}
           <form method="post" action="/login">
@@ -707,7 +707,7 @@ function renderLoginPage({ notice = "", error = "" } = {}) {
             </div>
             <button class="btn btn-primary" type="submit">${icons.shield}<span>فتح الداشبورد</span></button>
           </form>
-          <p class="muted">بعد تسجيل الدخول ستتمكن من التحكم بوقت النشر، ربط الصفحة، وتشغيل نشر يدوي عند الحاجة.</p>
+          <p class="muted">بعد تسجيل الدخول ستتمكن من التحكم بوقت النشر، متابعة وضع التوكن المباشر، وتشغيل نشر يدوي عند الحاجة.</p>
         </section>
       </main>
     `
@@ -738,14 +738,10 @@ function renderDashboard({ req, state, notice = "", error = "" }) {
             <div>
               <div class="eyebrow">${icons.spark}<span>Gemini + Facebook Page Automation</span></div>
               <h1>لوحة تحكم النشر التلقائي</h1>
-              <p>هذه اللوحة مقفولة على صفحتك فقط عبر <strong>FB_PAGE_ID</strong>، وتمنحك تحكمًا مباشرًا في وقت النشر وتشغيل منشور فوري عند الحاجة${isDirectMode ? " من دون خطوة ربط الصفحة." : " مع إمكانية ربط الصفحة عند الحاجة."}</p>
+              <p>هذه اللوحة مقفولة على صفحتك فقط عبر <strong>FB_PAGE_ID</strong>، وتمنحك تحكمًا مباشرًا في وقت النشر وتشغيل منشور فوري عند الحاجة${isDirectMode ? " من دون خطوة ربط الصفحة." : "."}</p>
             </div>
             <div class="toolbar">
-              ${
-                isDirectMode
-                  ? `<span class="btn btn-ghost">${icons.page}<span>وضع مباشر مفعل</span></span>`
-                  : `<a class="btn btn-ghost" href="/auth/facebook/start">${icons.link}<span>ربط الصفحة</span></a>`
-              }
+              <span class="btn btn-ghost">${icons.page}<span>${isDirectMode ? "وضع مباشر مفعل" : "تحتاج توكن الصفحة"}</span></span>
               <a class="btn btn-ghost" href="/status">${icons.status}<span>JSON</span></a>
               <form method="post" action="/logout">
                 <button class="btn btn-ghost" type="submit">${icons.logout}<span>خروج</span></button>
@@ -833,16 +829,16 @@ function renderDashboard({ req, state, notice = "", error = "" }) {
           </article>
 
           <article class="card span-4">
-            <h2 class="card-title">${icons.link}<span>${isDirectMode ? "الوضع المباشر" : "ربط الصفحة"}</span></h2>
+            <h2 class="card-title">${icons.page}<span>وضع الصفحة</span></h2>
             <p class="muted">${
               isDirectMode
                 ? "بوجود FB_PAGE_ACCESS_TOKEN لن تحتاج إلى ربط Facebook من الداشبورد. يكفي تشغيل البوت وسيستخدم التوكن المباشر للنشر على صفحتك."
-                : "بعد الضغط على الربط، سيقبل التطبيق فقط الصفحة التي يطابق معرفها قيمة FB_PAGE_ID داخل إعدادات Railway."
+                : "أضف FB_PAGE_ACCESS_TOKEN في Railway ليعمل البوت مباشرة على صفحتك المحددة في FB_PAGE_ID."
             }</p>
             ${
               isDirectMode
                 ? `<p class="muted">التوكن المباشر مفعل الآن، وآخر ربط محفوظ: ${escapeHtml(state.facebook.lastAuthAt || "غير مطلوب في هذا الوضع")}</p>`
-                : `<div class="inline-actions"><a class="btn btn-secondary" href="/auth/facebook/start">${icons.link}<span>إعادة ربط Facebook</span></a></div><p class="muted">آخر ربط: ${escapeHtml(state.facebook.lastAuthAt || "لم يتم بعد")}</p>`
+                : `<p class="muted">التوكن المباشر غير موجود بعد، لذلك لن يبدأ النشر التلقائي حتى تضيفه.</p><p class="muted">آخر ربط محفوظ: ${escapeHtml(state.facebook.lastAuthAt || "لم يتم بعد")}</p>`
             }
           </article>
 
