@@ -23,30 +23,14 @@ function computeBaseUrl() {
   return "http://localhost:3000";
 }
 
-function computeAiProvider() {
-  const explicitProvider = (process.env.AI_PROVIDER || "").trim().toLowerCase();
-  if (explicitProvider === "gemini" || explicitProvider === "") {
-    return "gemini";
-  }
-
-  return explicitProvider;
-}
-
 export const config = {
   port: Number(process.env.PORT || 3000),
   baseUrl: computeBaseUrl(),
   dashboardAccessCode: "5598",
-  aiProvider: computeAiProvider(),
-  geminiApiKey: process.env.GEMINI_API_KEY || "",
-  geminiModel: process.env.GEMINI_MODEL || "gemini-3-pro-preview",
   facebookAppId: process.env.FB_APP_ID || "",
   facebookAppSecret: process.env.FB_APP_SECRET || "",
   facebookPageId: process.env.FB_PAGE_ID || "",
   facebookPageAccessToken: process.env.FB_PAGE_ACCESS_TOKEN || "",
-  contentLanguage: process.env.CONTENT_LANGUAGE || "Arabic",
-  contentBrief:
-    process.env.CONTENT_BRIEF ||
-    "اكتب منشورات عربية قصيرة ومفيدة لصفحتي على فيسبوك، بأسلوب احترافي وقريب من الناس.",
   postIntervalMinutes: Number(process.env.POST_INTERVAL_MINUTES || 10),
   timezone: process.env.TIMEZONE || "UTC",
   dataDir,
@@ -56,14 +40,6 @@ export const config = {
 
 export function getMissingCoreConfig() {
   const missing = [];
-
-  if (config.aiProvider !== "gemini") {
-    missing.push("AI_PROVIDER must be gemini");
-  }
-
-  if (!config.geminiApiKey) {
-    missing.push("GEMINI_API_KEY");
-  }
 
   if (!config.facebookPageId) {
     missing.push("FB_PAGE_ID");

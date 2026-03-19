@@ -10,16 +10,9 @@ const defaultState = {
     pages: [],
     lastAuthAt: ""
   },
+  queuedPosts: [],
+  queueCounter: 0,
   posts: [],
-  preview: {
-    nextPost: "",
-    generatedAt: "",
-    lastError: ""
-  },
-  settings: {
-    contentBrief: "",
-    contentLanguage: ""
-  },
   scheduler: {
     enabled: true,
     intervalMinutes: config.postIntervalMinutes,
@@ -45,15 +38,9 @@ export function readState() {
         ...structuredClone(defaultState.facebook),
         ...(parsed.facebook || {})
       },
+      queuedPosts: Array.isArray(parsed.queuedPosts) ? parsed.queuedPosts : [],
+      queueCounter: Number.isInteger(parsed.queueCounter) ? parsed.queueCounter : 0,
       posts: Array.isArray(parsed.posts) ? parsed.posts : [],
-      preview: {
-        ...structuredClone(defaultState.preview),
-        ...(parsed.preview || {})
-      },
-      settings: {
-        ...structuredClone(defaultState.settings),
-        ...(parsed.settings || {})
-      },
       scheduler: {
         ...structuredClone(defaultState.scheduler),
         ...(parsed.scheduler || {})

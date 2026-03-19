@@ -10,7 +10,6 @@ import {
   getPostDetails,
   publishPagePost
 } from "./facebook.js";
-import { generatePost, getActiveAiModel } from "./ai.js";
 import { getSchedulerSnapshot, schedulerIsActive, startScheduler, stopScheduler } from "./scheduler.js";
 import { readState, updateState } from "./storage.js";
 import {
@@ -18,10 +17,9 @@ import {
   icons,
   renderDashboardPage,
   renderField,
-  renderFormSection,
-  renderItems,
   renderLoginPage,
   renderMetrics,
+  renderItems,
   sectionExists
 } from "./dashboard.js";
 
@@ -130,17 +128,12 @@ function ensureDashboardAuth(req, res, next) {
     return;
   }
 
-  const acceptsJson = (req.headers.accept || "").includes("application/json");
-  if (acceptsJson || req.path === "/status") {
+  if ((req.headers.accept || "").includes("application/json") || req.path === "/status") {
     res.status(401).json({ ok: false, error: "Dashboard authentication required." });
     return;
   }
 
-  res.type("html").send(
-    renderLoginPage({
-      error: "أدخل الكود أولاً للوصول إلى الداشبورد."
-    })
-  );
+  res.type("html").send(renderLoginPage({ error: "أدخل الكود أولاً للوصول إلى الداشبورد." }));
 }
 
 function getScheduleSettings(state = readState()) {
@@ -152,13 +145,6 @@ function getScheduleSettings(state = readState()) {
   return {
     enabled: state.scheduler.enabled !== false,
     intervalMinutes
-  };
-}
-
-function getEffectiveContentSettings(state = readState()) {
-  return {
-    contentBrief: state.settings.contentBrief || config.contentBrief,
-    contentLanguage: state.settings.contentLanguage || config.contentLanguage
   };
 }
 
@@ -189,6 +175,34 @@ function getResolvedPageConnection(state = readState()) {
   };
 }
 
+function normalizeErrorMessage(error) {
+  const raw = String(error?.message || error || "").trim();
+  return raw || "حدث خطأ غير معروف.";
+}
+
+function parseQueuedPosts(rawText) {
+  const matches = [];
+  const regex = /@([\s\S]*?)@/g;
+  let match;
+
+  while ((match = regex.exec(rawText)) !== null) {
+    const text = match[1].trim();
+    if (text) {
+      matches.push(text);
+    }
+  }
+
+  return matches;
+}
+
+function getQueuedPosts(state = readState()) {
+  return Array.isArray(state.queuedPosts) ? state.queuedPosts : [];
+}
+
+function getNextQueuedPost(state = readState()) {
+  return getQueuedPosts(state)[0] || null;
+}
+
 function computeNextRunText(state = readState()) {
   const schedule = getScheduleSettings(state);
 
@@ -202,28 +216,6 @@ function computeNextRunText(state = readState()) {
 
   const next = new Date(new Date(state.scheduler.lastRunAt).getTime() + schedule.intervalMinutes * 60 * 1000);
   return next.toLocaleString("ar-MA", { dateStyle: "short", timeStyle: "short" });
-}
-
-function normalizeErrorMessage(error) {
-  const raw = String(error?.message || error || "").trim();
-
-  try {
-    const parsed = JSON.parse(raw);
-    const nested = parsed?.error?.message || parsed?.message || "";
-    if (nested) {
-      return nested;
-    }
-  } catch {}
-
-  if (raw.includes("429") || raw.includes("RESOURCE_EXHAUSTED")) {
-    return "تم تجاوز حصة Gemini الحالية. خفف عدد الطلبات أو راجع الخطة والفوترة.";
-  }
-
-  if (raw.includes("NOT_FOUND") && raw.includes("models/")) {
-    return "اسم نموذج Gemini غير صحيح أو غير مدعوم. راجع قيمة GEMINI_MODEL.";
-  }
-
-  return raw || "حدث خطأ غير معروف.";
 }
 
 async function refreshDirectPageProfile() {
@@ -248,44 +240,40 @@ async function refreshDirectPageProfile() {
 async function runPostingJob() {
   const state = readState();
   const connection = getResolvedPageConnection(state);
-  const contentSettings = getEffectiveContentSettings(state);
+  const nextPost = getNextQueuedPost(state);
 
   if (!connection.pageId || !connection.pageAccessToken) {
     throw new Error("الصفحة غير جاهزة بعد. أضف FB_PAGE_ACCESS_TOKEN الصحيح.");
   }
 
-  const message = await generatePost({
-    pageName: connection.pageName,
-    recentPosts: state.posts,
-    contentBrief: contentSettings.contentBrief,
-    contentLanguage: contentSettings.contentLanguage
-  });
+  if (!nextPost) {
+    throw new Error("لا توجد منشورات مبرمجة للنشر حاليًا.");
+  }
 
   const publishResult = await publishPagePost({
     pageId: connection.pageId,
     pageAccessToken: connection.pageAccessToken,
-    message
+    message: nextPost.text
   });
 
   updateState((current) => {
+    current.queuedPosts = current.queuedPosts.filter((post) => post.id !== nextPost.id);
     current.posts.push({
       id: publishResult.id,
-      message,
-      createdAt: new Date().toISOString()
+      message: nextPost.text,
+      createdAt: new Date().toISOString(),
+      queueId: nextPost.id
     });
-    current.posts = current.posts.slice(-30);
-    current.preview.nextPost = "";
-    current.preview.generatedAt = "";
-    current.preview.lastError = "";
+    current.posts = current.posts.slice(-40);
     current.scheduler.lastRunAt = new Date().toISOString();
-    current.scheduler.lastResult = `تم النشر بنجاح على ${connection.pageName}`;
+    current.scheduler.lastResult = `تم نشر المنشور رقم ${nextPost.id} بنجاح`;
     current.scheduler.lastError = "";
     return current;
   });
 
   return {
     postId: publishResult.id,
-    message
+    message: nextPost.text
   };
 }
 
@@ -317,104 +305,93 @@ function syncScheduler() {
   return getSchedulerSnapshot();
 }
 
-function statusLevel(state = readState()) {
-  if (state.scheduler.lastError) {
-    return "bad";
-  }
+function renderQueuedPostsEditor(state) {
+  const queuedPosts = getQueuedPosts(state);
 
-  if (!getScheduleSettings(state).enabled || !schedulerIsActive()) {
-    return "warn";
-  }
-
-  return "good";
-}
-
-async function generatePreviewPost() {
-  const state = readState();
-  const connection = getResolvedPageConnection(state);
-  const contentSettings = getEffectiveContentSettings(state);
-  const nextPost = await generatePost({
-    pageName: connection.pageName,
-    recentPosts: state.posts,
-    contentBrief: contentSettings.contentBrief,
-    contentLanguage: contentSettings.contentLanguage
-  });
-
-  updateState((current) => {
-    current.preview.nextPost = nextPost;
-    current.preview.generatedAt = new Date().toISOString();
-    current.preview.lastError = "";
-    return current;
-  });
-
-  return nextPost;
-}
-
-async function ensureNextPostPreview() {
-  const state = readState();
-
-  if (state.preview.nextPost) {
-    return state;
-  }
-
-  try {
-    await generatePreviewPost();
-  } catch (error) {
-    updateState((current) => {
-      current.preview.lastError = normalizeErrorMessage(error);
-      return current;
-    });
-  }
-
-  return readState();
+  return `
+    <section class="section">
+      <h2>${icons.edit}<span>إضافة منشورات جديدة</span></h2>
+      <form method="post" action="/dashboard/content">
+        ${renderField({
+          label: "ألصق هنا نصًا كبيرًا، وكل جزء بين @ و @ سيتم اعتباره منشورًا مستقلاً.",
+          name: "bulkText",
+          type: "textarea",
+          value: "",
+          rows: 10
+        })}
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">إضافة المنشورات</button>
+        </div>
+      </form>
+    </section>
+    <section class="section">
+      <h2>${icons.posts}<span>المنشورات المبرمجة للنشر</span></h2>
+      ${
+        queuedPosts.length
+          ? `<div class="queue-list">
+              ${queuedPosts
+                .map(
+                  (post, index) => `
+                    <article class="queue-card">
+                      <div class="queue-head">
+                        <span class="queue-number">#${index + 1} <small>المعرف ${escapeHtml(post.id)}</small></span>
+                        <form method="post" action="/dashboard/content/delete/${encodeURIComponent(post.id)}">
+                          <button class="queue-delete" type="submit">x</button>
+                        </form>
+                      </div>
+                      <pre class="queue-text">${escapeHtml(post.text)}</pre>
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>`
+          : `<div class="empty">لا توجد منشورات مبرمجة بعد. ألصق نصك بين @ و @ لإضافة أي عدد تريده.</div>`
+      }
+    </section>
+  `;
 }
 
 async function buildOverviewBody(state) {
   const schedule = getScheduleSettings(state);
-  const contentSettings = getEffectiveContentSettings(state);
   const connection = getResolvedPageConnection(state);
-  const metrics = [
-    {
-      label: "حالة الجدولة",
-      value: schedule.enabled && schedulerIsActive() ? "نشطة" : "متوقفة",
-      level: statusLevel(state)
-    },
-    {
-      label: "وقت النشر",
-      value: `كل ${schedule.intervalMinutes} دقيقة`,
-      note: `المنطقة الزمنية: ${config.timezone}`,
-      icon: icons.clock
-    },
-    {
-      label: "المنشور التالي",
-      value: computeNextRunText(state),
-      note: state.preview.generatedAt ? `آخر معاينة: ${state.preview.generatedAt}` : "لا توجد معاينة محفوظة",
-      icon: icons.spark
-    },
-    {
-      label: "الصفحة",
-      value: connection.pageName,
-      note: `FB_PAGE_ID: ${config.facebookPageId}`,
-      icon: icons.page
-    },
-    {
-      label: "عدد المنشورات",
-      value: String(state.posts.length),
-      note: state.scheduler.lastResult || "لا توجد نتيجة حديثة",
-      icon: icons.posts
-    },
-    {
-      label: "محتوى المنشورات",
-      value: contentSettings.contentLanguage,
-      note: contentSettings.contentBrief.slice(0, 90),
-      icon: icons.edit
-    }
-  ];
+  const queuedPosts = getQueuedPosts(state);
+  const nextPost = getNextQueuedPost(state);
 
   return `
     <section class="section">
       <h2>${icons.overview}<span>النظرة العامة</span></h2>
-      ${renderMetrics(metrics)}
+      ${renderMetrics([
+        {
+          label: "حالة الجدولة",
+          value: schedule.enabled && schedulerIsActive() ? "نشطة" : "متوقفة",
+          level: schedule.enabled && schedulerIsActive() ? "good" : "warn",
+          icon: icons.clock
+        },
+        {
+          label: "عدد المنشورات المبرمجة",
+          value: String(queuedPosts.length),
+          note: nextPost ? `المنشور التالي هو رقم ${queuedPosts.findIndex((post) => post.id === nextPost.id) + 1}` : "لا يوجد منشور جاهز الآن",
+          icon: icons.posts
+        },
+        {
+          label: "عدد المنشورات المنشورة",
+          value: String(state.posts.length),
+          note: state.scheduler.lastResult || "لا توجد نتيجة حديثة",
+          icon: icons.status
+        },
+        {
+          label: "الصفحة",
+          value: connection.pageName,
+          note: `FB_PAGE_ID: ${config.facebookPageId}`,
+          icon: icons.page
+        },
+        {
+          label: "وقت النشر",
+          value: `كل ${schedule.intervalMinutes} دقيقة`,
+          note: computeNextRunText(state),
+          icon: icons.clock
+        }
+      ])}
     </section>
     <section class="section">
       <h2>${icons.status}<span>آخر تحديثات البوت</span></h2>
@@ -500,34 +477,31 @@ function buildTimingBody(state) {
 }
 
 function buildNextPostBody(state) {
-  const contentSettings = getEffectiveContentSettings(state);
+  const queuedPosts = getQueuedPosts(state);
+  const nextPost = getNextQueuedPost(state);
+  const nextIndex = nextPost ? queuedPosts.findIndex((post) => post.id === nextPost.id) + 1 : 0;
+
   return `
-    ${renderFormSection({
-      title: "تحديث المعاينة",
-      icon: icons.spark,
-      action: "/dashboard/next-post/generate",
-      fields: [],
-      actions: ['<button class="btn btn-primary" type="submit">تحديث المعاينة</button>'],
-      helper: "عند فتح هذه الصفحة يتم توليد المعاينة تلقائيًا. هذا الزر فقط لإعادة توليدها يدويًا."
-    })}
     <section class="section">
-      <h2>${icons.spark}<span>المعاينة الحالية</span></h2>
-      ${renderItems(
-        state.preview.nextPost
-          ? [{
-              meta: `تم التوليد في: ${escapeHtml(state.preview.generatedAt || "-")} | اللغة: ${escapeHtml(contentSettings.contentLanguage)}`,
-              text: state.preview.nextPost
-            }]
-          : [],
-        state.preview.lastError || "تعذر إنشاء معاينة تلقائية الآن."
-      )}
+      <h2>${icons.spark}<span>المنشور التالي</span></h2>
+      ${nextPost
+        ? `<div class="queue-list">
+            <article class="queue-card">
+              <div class="queue-head">
+                <span class="queue-number">#${nextIndex} <small>المعرف ${escapeHtml(nextPost.id)}</small></span>
+              </div>
+              <pre class="queue-text">${escapeHtml(nextPost.text)}</pre>
+            </article>
+          </div>`
+        : `<div class="empty">لا يوجد أي منشور مبرمج حاليًا. أضف منشورات من صفحة إدارة المنشورات.</div>`
+      }
     </section>
   `;
 }
 
 async function buildPostsBody(state) {
   const connection = getResolvedPageConnection(state);
-  const posts = state.posts.slice(-12).reverse();
+  const posts = state.posts.slice(-15).reverse();
   const enriched = await Promise.all(
     posts.map(async (post) => {
       try {
@@ -640,33 +614,7 @@ async function buildAudienceBody(state) {
 }
 
 function buildContentBody(state) {
-  const contentSettings = getEffectiveContentSettings(state);
-  const usingDashboardOverride = Boolean(state.settings.contentBrief || state.settings.contentLanguage);
-
-  return `
-    ${renderFormSection({
-      title: "تغيير محتوى المنشورات",
-      icon: icons.edit,
-      action: "/dashboard/content",
-      fields: [
-        renderField({ label: "لغة المنشورات", name: "contentLanguage", value: contentSettings.contentLanguage }),
-        renderField({ label: "تعليمات المحتوى", name: "contentBrief", type: "textarea", value: contentSettings.contentBrief, rows: 10 })
-      ],
-      actions: [
-        '<button class="btn btn-primary" type="submit">حفظ المحتوى</button>',
-        '<button class="btn btn-secondary" type="submit" name="resetContent" value="1">العودة إلى القيم الأصلية</button>'
-      ],
-      helper: "هذا النص هو الذي يوجّه Gemini لصياغة المنشورات القادمة."
-    })}
-    <section class="section">
-      <h2>${icons.edit}<span>المصدر الحالي للمحتوى</span></h2>
-      ${renderMetrics([
-        { label: "المصدر", value: usingDashboardOverride ? "إعدادات الداشبورد" : "متغيرات Railway", level: usingDashboardOverride ? "good" : "warn", icon: icons.status },
-        { label: "اللغة", value: contentSettings.contentLanguage, icon: icons.edit },
-        { label: "عدد الحروف", value: String(contentSettings.contentBrief.length), icon: icons.edit }
-      ])}
-    </section>
-  `;
+  return renderQueuedPostsEditor(state);
 }
 
 async function buildSectionView(sectionKey, state) {
@@ -674,26 +622,25 @@ async function buildSectionView(sectionKey, state) {
     case "overview":
       return {
         pageTitle: "نظرة عامة",
-        pageDescription: "ملخص سريع لحالة البوت، وقت النشر، الصفحة المستهدفة، وآخر النتائج.",
+        pageDescription: "ملخص لحالة البوت، وقت النشر، وعدد المنشورات المبرمجة والمنشورة.",
         body: await buildOverviewBody(state)
       };
     case "timing":
       return {
         pageTitle: "التحكم في الوقت",
-        pageDescription: "تغيير الفاصل الزمني بين المنشورات وتشغيل أو إيقاف الجدولة من داخل الداشبورد.",
+        pageDescription: "تغيير الفاصل الزمني بين المنشورات وتشغيل أو إيقاف الجدولة.",
         body: buildTimingBody(state)
       };
     case "next-post":
-      state = await ensureNextPostPreview();
       return {
         pageTitle: "المنشور التالي",
-        pageDescription: "تظهر هنا معاينة المنشور التالي مباشرة عند فتح الصفحة.",
+        pageDescription: "يعرض أول منشور في طابور النشر كما هو.",
         body: buildNextPostBody(state)
       };
     case "posts":
       return {
         pageTitle: "المنشورات التي تم نشرها",
-        pageDescription: "مراجعة آخر المنشورات التي نشرها البوت مع بياناتها الأساسية.",
+        pageDescription: "مراجعة آخر المنشورات التي نشرها البوت.",
         body: await buildPostsBody(state)
       };
     case "audience":
@@ -704,8 +651,8 @@ async function buildSectionView(sectionKey, state) {
       };
     case "content":
       return {
-        pageTitle: "تغيير محتوى المنشورات",
-        pageDescription: "تعديل لغة وتعليمات المحتوى التي تُرسل إلى Gemini مباشرة من الواجهة.",
+        pageTitle: "إدارة المنشورات",
+        pageDescription: "ألصق نصًا كبيرًا، وكل جزء بين @ و @ سيتم إضافته كمنشور مستقل قابل للحذف.",
         body: buildContentBody(state)
       };
     default:
@@ -775,9 +722,7 @@ app.post("/login", (req, res) => {
 
 app.post("/logout", ensureDashboardAuth, (req, res) => {
   clearDashboardSession(res);
-  redirectWithMessage(res, "/", {
-    notice: "تم تسجيل الخروج بنجاح."
-  });
+  redirectWithMessage(res, "/", { notice: "تم تسجيل الخروج بنجاح." });
 });
 
 app.get("/dashboard", ensureDashboardAuth, (req, res) => {
@@ -818,54 +763,52 @@ app.post("/dashboard/timing", ensureDashboardAuth, (req, res) => {
 });
 
 app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
+  const bulkText = String(req.body.bulkText || "");
+  const posts = parseQueuedPosts(bulkText);
+
+  if (!posts.length) {
+    redirectWithMessage(res, "/dashboard/content", {
+      error: "لم يتم العثور على منشورات بين الرمز @ والرمز @."
+    });
+    return;
+  }
+
   updateState((current) => {
-    if (req.body.resetContent === "1") {
-      current.settings.contentBrief = "";
-      current.settings.contentLanguage = "";
-    } else {
-      current.settings.contentBrief = String(req.body.contentBrief || "").trim();
-      current.settings.contentLanguage = String(req.body.contentLanguage || "").trim();
+    for (const text of posts) {
+      current.queueCounter += 1;
+      current.queuedPosts.push({
+        id: current.queueCounter,
+        text,
+        createdAt: new Date().toISOString()
+      });
     }
     return current;
   });
 
   redirectWithMessage(res, "/dashboard/content", {
-    notice: req.body.resetContent === "1" ? "تمت العودة إلى القيم الأصلية." : "تم حفظ محتوى المنشورات الجديد."
+    notice: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`
   });
 });
 
-app.post("/dashboard/next-post/generate", ensureDashboardAuth, async (req, res) => {
-  try {
-    await generatePreviewPost();
-    redirectWithMessage(res, "/dashboard/next-post", {
-      notice: "تم توليد المنشور التالي بنجاح."
-    });
-  } catch (error) {
-    updateState((current) => {
-      current.preview.lastError = normalizeErrorMessage(error);
-      return current;
-    });
-    redirectWithMessage(res, "/dashboard/next-post", {
-      error: normalizeErrorMessage(error)
-    });
-  }
+app.post("/dashboard/content/delete/:id", ensureDashboardAuth, (req, res) => {
+  const id = Number.parseInt(String(req.params.id || ""), 10);
+
+  updateState((current) => {
+    current.queuedPosts = current.queuedPosts.filter((post) => post.id !== id);
+    return current;
+  });
+
+  redirectWithMessage(res, "/dashboard/content", {
+    notice: `تم حذف المنشور رقم ${id}.`
+  });
 });
 
-app.get("/dashboard/next-post/generate", ensureDashboardAuth, async (req, res) => {
-  try {
-    await generatePreviewPost();
-    redirectWithMessage(res, "/dashboard/next-post", {
-      notice: "تم تحديث المعاينة بنجاح."
-    });
-  } catch (error) {
-    updateState((current) => {
-      current.preview.lastError = normalizeErrorMessage(error);
-      return current;
-    });
-    redirectWithMessage(res, "/dashboard/next-post", {
-      error: normalizeErrorMessage(error)
-    });
-  }
+app.get("/dashboard/next-post/generate", ensureDashboardAuth, (req, res) => {
+  res.redirect("/dashboard/next-post");
+});
+
+app.post("/dashboard/next-post/generate", ensureDashboardAuth, (req, res) => {
+  res.redirect("/dashboard/next-post");
 });
 
 app.get("/health", (req, res) => {
@@ -878,8 +821,6 @@ app.get("/status", ensureDashboardAuth, (req, res) => {
   res.json({
     ok: true,
     baseUrl: config.baseUrl,
-    aiProvider: config.aiProvider,
-    aiModel: getActiveAiModel(),
     configuredPageId: config.facebookPageId,
     directPageTokenConfigured: hasDirectPageAccessToken(),
     schedule: getScheduleSettings(state),
@@ -891,8 +832,8 @@ app.get("/status", ensureDashboardAuth, (req, res) => {
           mode: connection.mode
         }
       : null,
-    settings: getEffectiveContentSettings(state),
-    preview: state.preview,
+    queuedPosts: getQueuedPosts(state),
+    nextPost: getNextQueuedPost(state),
     missingEnv: getMissingCoreConfig(),
     lastRunAt: state.scheduler.lastRunAt,
     lastResult: state.scheduler.lastResult,
@@ -970,13 +911,18 @@ async function maybeRunStartupPost() {
 
   const lastRunAt = state.scheduler.lastRunAt ? new Date(state.scheduler.lastRunAt).getTime() : 0;
   const minDelayMs = schedule.intervalMinutes * 60 * 1000;
+
   if (lastRunAt && Number.isFinite(lastRunAt) && Date.now() - lastRunAt < minDelayMs) {
+    return;
+  }
+
+  if (!getNextQueuedPost(state)) {
     return;
   }
 
   try {
     await runPostingJob();
-    console.log("[startup] initial post published using direct page token");
+    console.log("[startup] initial queued post published");
   } catch (error) {
     updateState((current) => {
       current.scheduler.lastRunAt = new Date().toISOString();

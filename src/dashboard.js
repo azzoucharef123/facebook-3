@@ -367,6 +367,47 @@ function shell({ title, body }) {
           line-height: 1.8;
           margin-top: 10px;
         }
+        .queue-list {
+          display: grid;
+          gap: 14px;
+          margin-top: 18px;
+        }
+        .queue-card {
+          background: linear-gradient(140deg, rgba(218, 240, 232, .92), rgba(255,255,255,.96));
+          border: 1px solid rgba(13, 106, 89, .16);
+          border-radius: 20px;
+          padding: 16px;
+        }
+        .queue-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+        .queue-number {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--brand);
+          font-weight: 700;
+        }
+        .queue-delete {
+          width: 38px;
+          height: 38px;
+          border-radius: 12px;
+          border: 0;
+          background: rgba(184, 70, 70, .12);
+          color: var(--danger);
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .queue-text {
+          margin: 0;
+          white-space: pre-wrap;
+          line-height: 1.9;
+          color: var(--ink);
+        }
         @media (max-width: 1020px) {
           .layout {
             grid-template-columns: 1fr;
@@ -393,7 +434,7 @@ const sections = [
   { key: "next-post", label: "المنشور التالي", icon: icons.spark },
   { key: "posts", label: "المنشورات التي تم نشرها", icon: icons.posts },
   { key: "audience", label: "الأشخاص المتفاعلون", icon: icons.people },
-  { key: "content", label: "تغيير محتوى المنشورات", icon: icons.edit }
+  { key: "content", label: "إدارة المنشورات", icon: icons.edit }
 ];
 
 export function renderLoginPage({ notice = "", error = "" }) {
