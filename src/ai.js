@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 
@@ -26,39 +25,12 @@ function buildPrompt({ pageName, recentPosts }) {
   };
 }
 
-async function generateWithOpenAI(prompt) {
-  const client = new OpenAI({
-    apiKey: config.openAiApiKey
-  });
-
-  const response = await client.responses.create({
-    model: config.openAiModel,
-    input: [
-      {
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: prompt.system
-          }
-        ]
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: prompt.user
-          }
-        ]
-      }
-    ]
-  });
-
-  return response.output_text.trim();
+export function getActiveAiModel() {
+  return config.geminiModel;
 }
 
-async function generateWithGemini(prompt) {
+export async function generatePost({ pageName, recentPosts }) {
+  const prompt = buildPrompt({ pageName, recentPosts });
   const ai = new GoogleGenAI({
     apiKey: config.geminiApiKey
   });
@@ -88,20 +60,4 @@ async function generateWithGemini(prompt) {
   }
 
   return fallbackText;
-}
-
-export function getActiveAiModel() {
-  return config.aiProvider === "gemini"
-    ? config.geminiModel
-    : config.openAiModel;
-}
-
-export async function generatePost({ pageName, recentPosts }) {
-  const prompt = buildPrompt({ pageName, recentPosts });
-
-  if (config.aiProvider === "gemini") {
-    return generateWithGemini(prompt);
-  }
-
-  return generateWithOpenAI(prompt);
 }

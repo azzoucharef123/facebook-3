@@ -25,32 +25,17 @@ function computeBaseUrl() {
 
 function computeAiProvider() {
   const explicitProvider = (process.env.AI_PROVIDER || "").trim().toLowerCase();
-  const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
-  const geminiModel = (process.env.GEMINI_MODEL || "").trim().toLowerCase();
-  const openAiApiKey = (process.env.OPENAI_API_KEY || "").trim();
-
-  if (explicitProvider === "openai" || explicitProvider === "gemini") {
-    return explicitProvider;
-  }
-
-  // Fallbacks to reduce deployment mistakes on Railway.
-  if (geminiApiKey || geminiModel.startsWith("gemini")) {
+  if (explicitProvider === "gemini" || explicitProvider === "") {
     return "gemini";
   }
 
-  if (openAiApiKey) {
-    return "openai";
-  }
-
-  return "openai";
+  return explicitProvider;
 }
 
 export const config = {
   port: Number(process.env.PORT || 3000),
   baseUrl: computeBaseUrl(),
   aiProvider: computeAiProvider(),
-  openAiApiKey: process.env.OPENAI_API_KEY || "",
-  openAiModel: process.env.OPENAI_MODEL || "gpt-5",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-3-pro-preview",
   facebookAppId: process.env.FB_APP_ID || "",
@@ -70,16 +55,12 @@ export const config = {
 export function getMissingCoreConfig() {
   const missing = [];
 
-  if (config.aiProvider === "openai") {
-    if (!config.openAiApiKey) {
-      missing.push("OPENAI_API_KEY");
-    }
-  } else if (config.aiProvider === "gemini") {
-    if (!config.geminiApiKey) {
-      missing.push("GEMINI_API_KEY");
-    }
-  } else {
-    missing.push("AI_PROVIDER must be openai or gemini");
+  if (config.aiProvider !== "gemini") {
+    missing.push("AI_PROVIDER must be gemini");
+  }
+
+  if (!config.geminiApiKey) {
+    missing.push("GEMINI_API_KEY");
   }
 
   if (!config.facebookAppId) {

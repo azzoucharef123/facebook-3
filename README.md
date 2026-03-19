@@ -2,7 +2,7 @@
 
 هذا المشروع ينشئ بوت Node.js للنشر التلقائي إلى **Facebook Page** كل 10 دقائق باستخدام:
 
-- OpenAI أو Gemini لتوليد نص المنشور
+- Gemini لتوليد نص المنشور
 - Meta Graph API للنشر الرسمي
 - Facebook Login لربط الحساب واختيار الصفحة
 
@@ -18,8 +18,6 @@
 - https://ai.google.dev/models/gemini
 - https://ai.google.dev/gemini-api/docs/text-generation
 - https://ai.google.dev/tutorials/embed_node_quickstart
-- https://platform.openai.com/docs/libraries/node-js-library
-- https://platform.openai.com/docs/api-reference/responses
 
 ## 1. التثبيت
 
@@ -36,20 +34,20 @@ copy .env.example .env
 ثم عدل القيم التالية داخل `.env`:
 
 - `AI_PROVIDER`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
 - `FB_APP_ID`
 - `FB_APP_SECRET`
+- `FB_PAGE_ID`
+- `CONTENT_LANGUAGE`
 - `CONTENT_BRIEF`
+- `POST_INTERVAL_MINUTES`
+- `TIMEZONE`
 
 اختياري:
 
-- `OPENAI_API_KEY` إذا كان `AI_PROVIDER=openai`
-- `OPENAI_MODEL`
-- `GEMINI_API_KEY` إذا كان `AI_PROVIDER=gemini`
-- `GEMINI_MODEL`
 - `BASE_URL` إذا أردت تحديد الدومين يدويًا
 - `STATE_DIR` لتحديد مسار ملف الحالة
-- `FB_PAGE_ID` إذا أردت تثبيت صفحة معيّنة تلقائيًا
-- `POST_INTERVAL_MINUTES` لتغيير كل كم دقيقة يتم النشر
 
 ## 2. تشغيل البوت
 
@@ -94,9 +92,8 @@ http://localhost:3000/run-once
 - لا تضع هذا الملف في Git
 - إذا انتهت صلاحية الربط، أعد تسجيل الدخول من `/auth/facebook/start`
 - عدل `CONTENT_BRIEF` ليصبح المحتوى مناسبًا لمجالك بدل المنشورات العامة
-- إذا استخدمت Gemini، ضع `AI_PROVIDER=gemini`
 - بحسب وثائق Google الحالية في 19 مارس 2026، Gemini 3 متاح ضمن Gemini API، وبعض نماذجه ما تزال بصيغة Preview
-- إذا نسيت `AI_PROVIDER` لكن وضعت `GEMINI_API_KEY` أو موديل يبدأ بـ `gemini`، فالتطبيق سيختار Gemini تلقائيًا
+- هذا الإصدار يعتمد على Gemini فقط، لذلك اجعل `AI_PROVIDER=gemini`
 
 ## 7. النشر على GitHub
 
@@ -121,16 +118,16 @@ git push -u origin main
 1. ارفع المشروع إلى GitHub
 2. في Railway اختر `New Project` ثم `Deploy from GitHub Repo`
 3. أضف متغيرات البيئة:
-   - `AI_PROVIDER=gemini` أو `AI_PROVIDER=openai`
+   - `AI_PROVIDER=gemini`
    - `FB_APP_ID`
    - `FB_APP_SECRET`
    - `FB_PAGE_ID` اختياري
+   - `CONTENT_LANGUAGE`
    - `CONTENT_BRIEF`
    - `POST_INTERVAL_MINUTES`
    - `TIMEZONE`
-   - `GEMINI_API_KEY` إذا كنت تستخدم Gemini
-   - `GEMINI_MODEL=gemini-3-pro-preview` إذا كنت تستخدم Gemini
-   - `OPENAI_API_KEY` إذا كنت تستخدم OpenAI
+   - `GEMINI_API_KEY`
+   - `GEMINI_MODEL=gemini-3-pro-preview`
 4. أضف Volume في Railway إذا أردت الاحتفاظ بالتوكنات والحالة بعد إعادة التشغيل
 5. اضبط `STATE_DIR=/data` إذا كان الـ Volume مركبًا على `/data`
 6. بعد أن يعطيك Railway الدومين العام:
