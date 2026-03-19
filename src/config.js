@@ -23,10 +23,32 @@ function computeBaseUrl() {
   return "http://localhost:3000";
 }
 
+function computeAiProvider() {
+  const explicitProvider = (process.env.AI_PROVIDER || "").trim().toLowerCase();
+  const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
+  const geminiModel = (process.env.GEMINI_MODEL || "").trim().toLowerCase();
+  const openAiApiKey = (process.env.OPENAI_API_KEY || "").trim();
+
+  if (explicitProvider === "openai" || explicitProvider === "gemini") {
+    return explicitProvider;
+  }
+
+  // Fallbacks to reduce deployment mistakes on Railway.
+  if (geminiApiKey || geminiModel.startsWith("gemini")) {
+    return "gemini";
+  }
+
+  if (openAiApiKey) {
+    return "openai";
+  }
+
+  return "openai";
+}
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   baseUrl: computeBaseUrl(),
-  aiProvider: (process.env.AI_PROVIDER || "openai").toLowerCase(),
+  aiProvider: computeAiProvider(),
   openAiApiKey: process.env.OPENAI_API_KEY || "",
   openAiModel: process.env.OPENAI_MODEL || "gpt-5",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
