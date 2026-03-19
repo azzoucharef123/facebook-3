@@ -350,6 +350,25 @@ async function generatePreviewPost() {
   return nextPost;
 }
 
+async function ensureNextPostPreview() {
+  const state = readState();
+
+  if (state.preview.nextPost) {
+    return state;
+  }
+
+  try {
+    await generatePreviewPost();
+  } catch (error) {
+    updateState((current) => {
+      current.preview.lastError = normalizeErrorMessage(error);
+      return current;
+    });
+  }
+
+  return readState();
+}
+
 async function buildOverviewBody(state) {
   const schedule = getScheduleSettings(state);
   const contentSettings = getEffectiveContentSettings(state);
@@ -440,12 +459,12 @@ function buildNextPostBody(state) {
   const contentSettings = getEffectiveContentSettings(state);
   return `
     ${renderFormSection({
-      title: "إنشاء معاينة للمنشور التالي",
+      title: "تحديث المعاينة",
       icon: icons.spark,
       action: "/dashboard/next-post/generate",
       fields: [],
-      actions: ['<button class="btn btn-primary" type="submit">توليد المنشور التالي</button>'],
-      helper: "يتم استعمال إعدادات المحتوى الحالية ومنشوراتك السابقة لتفادي التكرار."
+      actions: ['<button class="btn btn-primary" type="submit">تحديث المعاينة</button>'],
+      helper: "عند فتح هذه الصفحة يتم توليد المعاينة تلقائيًا. هذا الزر فقط لإعادة توليدها يدويًا."
     })}
     <section class="section">
       <h2>${icons.spark}<span>المعاينة الحالية</span></h2>
@@ -456,7 +475,7 @@ function buildNextPostBody(state) {
               text: state.preview.nextPost
             }]
           : [],
-        state.preview.lastError || "لا توجد معاينة محفوظة بعد. اضغط زر التوليد لإنشاء المنشور التالي."
+        state.preview.lastError || "تعذر إنشاء معاينة تلقائية الآن."
       )}
     </section>
   `;
@@ -621,9 +640,10 @@ async function buildSectionView(sectionKey, state) {
         body: buildTimingBody(state)
       };
     case "next-post":
+      state = await ensureNextPostPreview();
       return {
         pageTitle: "المنشور التالي",
-        pageDescription: "إنشاء معاينة للمنشور التالي قبل موعد النشر التلقائي.",
+        pageDescription: "تظهر هنا معاينة المنشور التالي مباشرة عند فتح الصفحة.",
         body: buildNextPostBody(state)
       };
     case "posts":
@@ -775,6 +795,23 @@ app.post("/dashboard/next-post/generate", ensureDashboardAuth, async (req, res) 
     await generatePreviewPost();
     redirectWithMessage(res, "/dashboard/next-post", {
       notice: "تم توليد المنشور التالي بنجاح."
+    });
+  } catch (error) {
+    updateState((current) => {
+      current.preview.lastError = normalizeErrorMessage(error);
+      return current;
+    });
+    redirectWithMessage(res, "/dashboard/next-post", {
+      error: normalizeErrorMessage(error)
+    });
+  }
+});
+
+app.get("/dashboard/next-post/generate", ensureDashboardAuth, async (req, res) => {
+  try {
+    await generatePreviewPost();
+    redirectWithMessage(res, "/dashboard/next-post", {
+      notice: "تم تحديث المعاينة بنجاح."
     });
   } catch (error) {
     updateState((current) => {
