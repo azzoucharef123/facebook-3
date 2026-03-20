@@ -148,6 +148,13 @@ function getScheduleSettings(state = readState()) {
   };
 }
 
+function getBotState(state = readState()) {
+  return {
+    active: state.bot?.active === true,
+    startedAt: state.bot?.startedAt || ""
+  };
+}
+
 function hasDirectPageAccessToken() {
   return Boolean(config.facebookPageAccessToken);
 }
@@ -229,9 +236,19 @@ function getNextQueuedPost(state = readState()) {
 
 function computeNextRunText(state = readState()) {
   const schedule = getScheduleSettings(state);
+  const bot = getBotState(state);
+  const nextPost = getNextQueuedPost(state);
+
+  if (!bot.active) {
+    return "البوت متوقف";
+  }
 
   if (!schedule.enabled) {
-    return "الجدولة متوقفة";
+    return "الجدولة متوقفة من الإعدادات";
+  }
+
+  if (!nextPost) {
+    return "لا توجد منشورات مبرمجة حاليًا";
   }
 
   if (!state.scheduler.lastRunAt) {
@@ -240,6 +257,103 @@ function computeNextRunText(state = readState()) {
 
   const next = new Date(new Date(state.scheduler.lastRunAt).getTime() + schedule.intervalMinutes * 60 * 1000);
   return next.toLocaleString("ar-MA", { dateStyle: "short", timeStyle: "short" });
+}
+
+function getNextRunTimestamp(state = readState()) {
+  const schedule = getScheduleSettings(state);
+  const bot = getBotState(state);
+
+  if (!bot.active || !schedule.enabled) {
+    return "";
+  }
+
+  if (!getNextQueuedPost(state)) {
+    return "";
+  }
+
+  const reference = state.scheduler.lastRunAt || bot.startedAt;
+  if (!reference) {
+    return "";
+  }
+
+  const next = new Date(new Date(reference).getTime() + schedule.intervalMinutes * 60 * 1000);
+  return next.toISOString();
+}
+
+function buildHeaderHtml(state) {
+  const bot = getBotState(state);
+  const nextRunAt = getNextRunTimestamp(state);
+
+  return `
+    <div class="header-counters">
+      <div class="counter-pill">
+        <strong id="botRuntimeCounter">00:00:00</strong>
+        <span>مدة تشغيل البوت</span>
+      </div>
+      <div class="counter-pill">
+        <strong id="nextPostCountdown">--:--:--</strong>
+        <span>الوقت المتبقي لنشر المنشور التالي</span>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const runtimeNode = document.getElementById("botRuntimeCounter");
+        const nextPostNode = document.getElementById("nextPostCountdown");
+        const botActive = ${bot.active ? "true" : "false"};
+        const startedAt = ${JSON.stringify(bot.startedAt || "")};
+        const nextRunAt = ${JSON.stringify(nextRunAt || "")};
+
+        if (!runtimeNode || !nextPostNode) {
+          return;
+        }
+
+        const formatDuration = (totalSeconds) => {
+          const safe = Math.max(0, totalSeconds);
+          const hours = String(Math.floor(safe / 3600)).padStart(2, "0");
+          const minutes = String(Math.floor((safe % 3600) / 60)).padStart(2, "0");
+          const seconds = String(safe % 60).padStart(2, "0");
+          return hours + ":" + minutes + ":" + seconds;
+        };
+
+        const tick = () => {
+          const now = Date.now();
+          const startedMs = startedAt ? Date.parse(startedAt) : NaN;
+          const nextRunMs = nextRunAt ? Date.parse(nextRunAt) : NaN;
+
+          if (botActive && Number.isFinite(startedMs)) {
+            runtimeNode.textContent = formatDuration(Math.floor((now - startedMs) / 1000));
+          } else {
+            runtimeNode.textContent = "00:00:00";
+          }
+
+          if (botActive && Number.isFinite(nextRunMs)) {
+            const remaining = Math.ceil((nextRunMs - now) / 1000);
+            nextPostNode.textContent = remaining > 0 ? formatDuration(remaining) : "00:00:00";
+          } else {
+            nextPostNode.textContent = "--:--:--";
+          }
+        };
+
+        tick();
+        window.setInterval(tick, 1000);
+      })();
+    </script>
+  `;
+}
+
+function buildTopActions(sectionKey, state) {
+  const bot = getBotState(state);
+  const returnTo = `/dashboard/${sectionKey}`;
+
+  return `
+    <form method="post" action="/dashboard/bot-toggle?returnTo=${encodeURIComponent(returnTo)}">
+      <button class="btn btn-ghost" type="submit">
+        ${icons.run}
+        <span>${bot.active ? "إغلاق البوت" : "تشغيل البوت"}</span>
+      </button>
+    </form>
+    <a class="btn btn-ghost" href="/status">${icons.status}<span>JSON</span></a>
+  `;
 }
 
 async function refreshDirectPageProfile() {
@@ -304,8 +418,9 @@ async function runPostingJob() {
 function syncScheduler() {
   const state = readState();
   const schedule = getScheduleSettings(state);
+  const bot = getBotState(state);
 
-  if (!schedule.enabled) {
+  if (!schedule.enabled || !bot.active) {
     stopScheduler();
     return getSchedulerSnapshot();
   }
@@ -435,15 +550,16 @@ async function buildOverviewBody(state) {
   const connection = getResolvedPageConnection(state);
   const queuedPosts = getQueuedPosts(state);
   const nextPost = getNextQueuedPost(state);
+  const bot = getBotState(state);
 
   return `
     <section class="section">
       <h2>${icons.overview}<span>النظرة العامة</span></h2>
       ${renderMetrics([
         {
-          label: "حالة الجدولة",
-          value: schedule.enabled && schedulerIsActive() ? "نشطة" : "متوقفة",
-          level: schedule.enabled && schedulerIsActive() ? "good" : "warn",
+          label: "حالة البوت",
+          value: bot.active && schedule.enabled && schedulerIsActive() ? "يعمل" : "متوقف",
+          level: bot.active && schedule.enabled && schedulerIsActive() ? "good" : "warn",
           icon: icons.clock
         },
         {
@@ -752,6 +868,8 @@ async function renderSection(req, res, sectionKey) {
       sectionKey,
       pageTitle: section.pageTitle,
       pageDescription: section.pageDescription,
+      headerHtml: buildHeaderHtml(state),
+      actionsHtml: buildTopActions(sectionKey, state),
       body: section.body,
       notice: String(req.query.notice || ""),
       error: String(req.query.error || "")
@@ -841,6 +959,25 @@ app.post("/dashboard/timing", ensureDashboardAuth, (req, res) => {
   });
 });
 
+app.post("/dashboard/bot-toggle", ensureDashboardAuth, (req, res) => {
+  const returnTo = sectionExists(String(req.query.returnTo || "").replace("/dashboard/", ""))
+    ? String(req.query.returnTo || "/dashboard/overview")
+    : "/dashboard/overview";
+
+  const nextState = updateState((current) => {
+    const isActive = current.bot?.active === true;
+    current.bot.active = !isActive;
+    current.bot.startedAt = !isActive ? new Date().toISOString() : "";
+    current.scheduler.lastError = "";
+    return current;
+  });
+
+  syncScheduler();
+  redirectWithMessage(res, returnTo, {
+    notice: nextState.bot.active ? "تم تشغيل البوت في الخلفية." : "تم إغلاق البوت."
+  });
+});
+
 app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
   const bulkText = String(req.body.bulkText || "");
   const posts = parseQueuedPosts(bulkText);
@@ -920,8 +1057,10 @@ app.get("/status", ensureDashboardAuth, (req, res) => {
     baseUrl: config.baseUrl,
     configuredPageId: config.facebookPageId,
     directPageTokenConfigured: hasDirectPageAccessToken(),
+    bot: getBotState(state),
     schedule: getScheduleSettings(state),
     scheduler: getSchedulerSnapshot(),
+    nextRunAt: getNextRunTimestamp(state),
     connectedPage: connection.pageAccessToken
       ? {
           id: connection.pageId,
@@ -1001,8 +1140,9 @@ app.get("/auth/facebook/callback", ensureDashboardAuth, async (req, res) => {
 async function maybeRunStartupPost() {
   const state = readState();
   const schedule = getScheduleSettings(state);
+  const bot = getBotState(state);
 
-  if (!hasDirectPageAccessToken() || !schedule.enabled || getMissingCoreConfig().length) {
+  if (!hasDirectPageAccessToken() || !bot.active || !schedule.enabled || getMissingCoreConfig().length) {
     return;
   }
 

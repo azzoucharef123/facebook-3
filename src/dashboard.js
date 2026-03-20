@@ -224,6 +224,30 @@ function shell({ title, body }) {
           flex-wrap: wrap;
           gap: 10px;
         }
+        .header-counters {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 18px;
+        }
+        .counter-pill {
+          display: inline-flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 180px;
+          padding: 12px 14px;
+          border-radius: 18px;
+          background: rgba(255,255,255,.12);
+          border: 1px solid rgba(255,255,255,.14);
+        }
+        .counter-pill strong {
+          font-size: 22px;
+          line-height: 1.2;
+        }
+        .counter-pill span {
+          color: rgba(246,251,250,.82);
+          font-size: 13px;
+        }
         .section {
           background: var(--card);
           border: 1px solid var(--line);
@@ -478,10 +502,10 @@ export function renderDashboardPage(view) {
                 <div class="eyebrow">${activeSection.icon}<span>${escapeHtml(activeSection.label)}</span></div>
                 <h1>${escapeHtml(view.pageTitle)}</h1>
                 <p>${escapeHtml(view.pageDescription)}</p>
+                ${view.headerHtml || ""}
               </div>
               <div class="top-actions">
-                <a class="btn btn-ghost" href="/status">${icons.status}<span>JSON</span></a>
-                <a class="btn btn-ghost" href="/run-once">${icons.run}<span>نشر الآن</span></a>
+                ${view.actionsHtml || `<a class="btn btn-ghost" href="/status">${icons.status}<span>JSON</span></a>`}
               </div>
             </div>
           </header>

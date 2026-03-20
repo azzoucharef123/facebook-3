@@ -13,6 +13,10 @@ const defaultState = {
   queuedPosts: [],
   queueCounter: 0,
   posts: [],
+  bot: {
+    active: false,
+    startedAt: ""
+  },
   scheduler: {
     enabled: true,
     intervalMinutes: config.postIntervalMinutes,
@@ -41,6 +45,10 @@ export function readState() {
       queuedPosts: Array.isArray(parsed.queuedPosts) ? parsed.queuedPosts : [],
       queueCounter: Number.isInteger(parsed.queueCounter) ? parsed.queueCounter : 0,
       posts: Array.isArray(parsed.posts) ? parsed.posts : [],
+      bot: {
+        ...structuredClone(defaultState.bot),
+        ...(parsed.bot || {})
+      },
       scheduler: {
         ...structuredClone(defaultState.scheduler),
         ...(parsed.scheduler || {})
