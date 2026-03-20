@@ -360,6 +360,7 @@ function buildHeaderHtml(state) {
         const botActive = ${bot.active ? "true" : "false"};
         const startedAt = ${JSON.stringify(bot.startedAt || "")};
         const nextRunAt = ${JSON.stringify(nextRunAt || "")};
+        const reloadKey = "dashboard-auto-refresh-next-run";
 
         if (!runtimeNode || !nextPostNode || !deviceClockNode) {
           return;
@@ -396,6 +397,16 @@ function buildHeaderHtml(state) {
           if (botActive && Number.isFinite(nextRunMs)) {
             const remaining = Math.ceil((nextRunMs - now) / 1000);
             nextPostNode.textContent = remaining > 0 ? formatDuration(remaining) : "00:00:00";
+
+            if (remaining <= 0) {
+              const lastReloadedSlot = window.sessionStorage.getItem(reloadKey);
+              if (lastReloadedSlot !== nextRunAt) {
+                window.sessionStorage.setItem(reloadKey, nextRunAt);
+                window.setTimeout(() => {
+                  window.location.reload();
+                }, 1200);
+              }
+            }
           } else {
             nextPostNode.textContent = "--:--:--";
           }
