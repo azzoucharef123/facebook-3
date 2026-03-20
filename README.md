@@ -15,6 +15,13 @@
 
 - `DATABASE_URL`
 - `DEEPSEEK_API_KEY`
+- `POSTS_PER_BATCH`
+- `MIN_WORDS`
+- `MAX_WORDS`
+- `SIMILARITY_THRESHOLD`
+- `TOPIC`
+- `LANGUAGE`
+- `STYLE`
 - `FB_PAGE_ID`
 - `FB_PAGE_ACCESS_TOKEN`
 - `POST_INTERVAL_MINUTES`
@@ -92,6 +99,11 @@ http://localhost:3000
 - اختر عدد المنشورات
 - اضغط `توليد وإضافة للطابور`
 - سيتم توليد النصوص العربية وإضافتها مباشرة إلى طابور النشر وإلى Postgres
+- يمكن التحكم من Railway أيضًا في:
+  - `POSTS_PER_BATCH` لعدد المنشورات الافتراضي
+  - `MIN_WORDS` و `MAX_WORDS` لطول كل منشور
+  - `SIMILARITY_THRESHOLD` لتقليل التشابه
+  - `TOPIC` و `LANGUAGE` و `STYLE` لتخصيص التوليد
 
 ## النشر
 

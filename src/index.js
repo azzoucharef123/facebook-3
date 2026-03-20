@@ -619,19 +619,19 @@ function renderQueuedPostsEditor(state) {
       <h2>${icons.spark}<span>توليد منشورات بالذكاء الاصطناعي عبر DeepSeek</span></h2>
       <form id="aiPostsForm" method="post" action="/dashboard/content/ai">
         ${renderField({
-          label: "اكتب موضوع الصفحة أو نوع المنشورات التي تريدها. مثال: نصائح تعليمية قصيرة لطلبة الفيزياء والكيمياء.",
+          label: `اكتب التوجيه الإضافي للتوليد. الموضوع الافتراضي الحالي: ${config.topic} | اللغة: ${config.language} | الأسلوب: ${config.style}.`,
           name: "aiPrompt",
           type: "textarea",
-          value: "",
+          value: config.topic,
           rows: 6
         })}
         ${renderField({
           label: "عدد المنشورات المطلوب توليدها",
           name: "aiCount",
           type: "number",
-          value: "3",
+          value: String(config.postsPerBatch),
           min: "1",
-          max: "10"
+          max: "50"
         })}
         <div class="actions">
           <button class="btn btn-primary" type="submit">توليد وإضافة للطابور</button>
@@ -731,7 +731,7 @@ function renderQueuedPostsEditor(state) {
                 aiTextarea.value = "";
               }
               if (aiCountInput) {
-                aiCountInput.value = "3";
+                aiCountInput.value = "${String(config.postsPerBatch)}";
               }
             }
             openModal(options.successTitle || "تمت العملية", payload.message || "تمت العملية بنجاح.");
@@ -1289,18 +1289,10 @@ app.post("/dashboard/content", ensureDashboardAuth, async (req, res) => {
 app.post("/dashboard/content/ai", ensureDashboardAuth, async (req, res) => {
   const wantsJson = (req.headers.accept || "").includes("application/json");
   const aiPrompt = String(req.body.aiPrompt || "").trim();
-  const aiCount = Math.min(10, Math.max(1, Number.parseInt(String(req.body.aiCount || "3"), 10) || 3));
-
-  if (!aiPrompt) {
-    const error = "اكتب وصفًا واضحًا للمنشورات التي تريد توليدها.";
-    if (wantsJson) {
-      res.status(400).json({ ok: false, error });
-      return;
-    }
-
-    redirectWithMessage(res, "/dashboard/content", { error });
-    return;
-  }
+  const aiCount = Math.min(
+    50,
+    Math.max(1, Number.parseInt(String(req.body.aiCount || String(config.postsPerBatch)), 10) || config.postsPerBatch)
+  );
 
   try {
     const state = readState();
@@ -1309,7 +1301,7 @@ app.post("/dashboard/content/ai", ensureDashboardAuth, async (req, res) => {
       ...state.posts.slice(-8).map((post) => post.message)
     ];
     const generatedPosts = await generatePostsWithDeepSeek({
-      prompt: aiPrompt,
+      prompt: aiPrompt || config.topic,
       count: aiCount,
       existingPosts
     });
