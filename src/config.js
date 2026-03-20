@@ -27,6 +27,7 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   baseUrl: computeBaseUrl(),
   dashboardAccessCode: "5598",
+  databaseUrl: process.env.DATABASE_URL || "",
   facebookAppId: process.env.FB_APP_ID || "",
   facebookAppSecret: process.env.FB_APP_SECRET || "",
   facebookPageId: process.env.FB_PAGE_ID || "",

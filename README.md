@@ -13,6 +13,7 @@
 
 ضع هذه القيم في `.env` أو Railway:
 
+- `DATABASE_URL`
 - `FB_PAGE_ID`
 - `FB_PAGE_ACCESS_TOKEN`
 - `POST_INTERVAL_MINUTES`
@@ -95,7 +96,23 @@ http://localhost:3000
 
 ## ملاحظات
 
-- المنشورات المخزنة والحالة تُحفظ في `data/state.json`
+- إذا وضعت `DATABASE_URL` فسيتم تفعيل Postgres تلقائيًا
+- سيتم إنشاء جدولين تلقائيًا:
+  - `scheduled_posts` للمنشورات المجدولة
+  - `published_posts` للمنشورات المنشورة
+- عند إضافة منشورات من الداشبورد تُسجل في `scheduled_posts`
+- عند نجاح النشر تُحذف من `scheduled_posts` وتُسجل في `published_posts`
+- يتم الاحتفاظ أيضًا بملف `data/state.json` للحالة العامة للداشبورد
 - المنشورات المنشورة تُعرض في صفحة `المنشورات التي تم نشرها`
 - الأشخاص المتفاعلون يتم جلبهم من تعليقات أحدث المنشورات المنشورة
 - هذا الإصدار لا يستخدم Gemini ولا أي مزود ذكاء اصطناعي
+
+## Railway + Postgres
+
+1. أضف خدمة `Postgres` داخل Railway
+2. افتح خدمة `facebook-3`
+3. في `Variables` أضف متغيرًا باسم `DATABASE_URL`
+4. اجعل قيمته من خدمة Postgres عبر Variable Reference أو انسخ قيمة `DATABASE_URL` الداخلية
+5. أعد نشر الخدمة
+
+بعد ذلك سيقوم التطبيق بإنشاء الجداول ومزامنة المنشورات تلقائيًا.

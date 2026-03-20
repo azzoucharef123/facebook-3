@@ -2,6 +2,15 @@ import crypto from "node:crypto";
 import express from "express";
 import { config, getMissingCoreConfig } from "./config.js";
 import {
+  deleteScheduledPost,
+  ensureDatabaseSeededFromState,
+  initDatabase,
+  insertScheduledPosts,
+  isDatabaseConfigured,
+  loadDatabaseSnapshot,
+  moveScheduledPostToPublished
+} from "./database.js";
+import {
   exchangeCodeForLongLivedUserToken,
   getFacebookLoginUrl,
   getManagedPages,
@@ -494,12 +503,21 @@ async function runPostingJob() {
     message: nextPost.text
   });
 
+  const publishedAt = new Date().toISOString();
+
+  await moveScheduledPostToPublished({
+    queueId: nextPost.id,
+    facebookPostId: publishResult.id,
+    message: nextPost.text,
+    createdAt: publishedAt
+  });
+
   updateState((current) => {
     current.queuedPosts = current.queuedPosts.filter((post) => post.id !== nextPost.id);
     current.posts.push({
       id: publishResult.id,
       message: nextPost.text,
-      createdAt: new Date().toISOString(),
+      createdAt: publishedAt,
       queueId: nextPost.id
     });
     current.posts = current.posts.slice(-40);
@@ -1101,7 +1119,7 @@ app.post("/dashboard/bot-toggle", ensureDashboardAuth, (req, res) => {
   }
 });
 
-app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
+app.post("/dashboard/content", ensureDashboardAuth, async (req, res) => {
   const bulkText = String(req.body.bulkText || "");
   const posts = parseQueuedPosts(bulkText);
   const wantsJson = (req.headers.accept || "").includes("application/json");
@@ -1121,43 +1139,70 @@ app.post("/dashboard/content", ensureDashboardAuth, (req, res) => {
     return;
   }
 
-  const nextState = updateState((current) => {
-    for (const text of posts) {
-      current.queueCounter += 1;
-      current.queuedPosts.push({
-        id: current.queueCounter,
+  try {
+    const currentState = readState();
+    let nextCounter = currentState.queueCounter;
+    const createdAt = new Date().toISOString();
+    const queuedEntries = posts.map((text) => {
+      nextCounter += 1;
+      return {
+        id: nextCounter,
         text,
-        createdAt: new Date().toISOString()
-      });
-    }
-    return current;
-  });
-
-  if (wantsJson) {
-    res.json({
-      ok: true,
-      message: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`,
-      queueHtml: renderQueuedPostsList(getQueuedPosts(nextState))
+        createdAt
+      };
     });
-    return;
-  }
 
-  redirectWithMessage(res, "/dashboard/content", {
-    notice: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`
-  });
+    await insertScheduledPosts(queuedEntries);
+
+    const nextState = updateState((current) => {
+      current.queueCounter = nextCounter;
+      current.queuedPosts.push(...queuedEntries);
+      return current;
+    });
+
+    if (wantsJson) {
+      res.json({
+        ok: true,
+        message: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`,
+        queueHtml: renderQueuedPostsList(getQueuedPosts(nextState))
+      });
+      return;
+    }
+
+    redirectWithMessage(res, "/dashboard/content", {
+      notice: `تمت إضافة ${posts.length} منشور(ات) إلى الطابور.`
+    });
+  } catch (error) {
+    const message = `تعذر حفظ المنشورات: ${normalizeErrorMessage(error)}`;
+
+    if (wantsJson) {
+      res.status(500).json({ ok: false, error: message });
+      return;
+    }
+
+    redirectWithMessage(res, "/dashboard/content", { error: message });
+  }
 });
 
-app.post("/dashboard/content/delete/:id", ensureDashboardAuth, (req, res) => {
+app.post("/dashboard/content/delete/:id", ensureDashboardAuth, async (req, res) => {
   const id = Number.parseInt(String(req.params.id || ""), 10);
 
-  updateState((current) => {
-    current.queuedPosts = current.queuedPosts.filter((post) => post.id !== id);
-    return current;
-  });
+  try {
+    await deleteScheduledPost(id);
 
-  redirectWithMessage(res, "/dashboard/content", {
-    notice: `تم حذف المنشور رقم ${id}.`
-  });
+    updateState((current) => {
+      current.queuedPosts = current.queuedPosts.filter((post) => post.id !== id);
+      return current;
+    });
+
+    redirectWithMessage(res, "/dashboard/content", {
+      notice: `تم حذف المنشور رقم ${id}.`
+    });
+  } catch (error) {
+    redirectWithMessage(res, "/dashboard/content", {
+      error: `تعذر حذف المنشور من قاعدة البيانات: ${normalizeErrorMessage(error)}`
+    });
+  }
 });
 
 app.get("/dashboard/next-post/generate", ensureDashboardAuth, (req, res) => {
@@ -1178,6 +1223,7 @@ app.get("/status", ensureDashboardAuth, (req, res) => {
   res.json({
     ok: true,
     baseUrl: config.baseUrl,
+    databaseConfigured: isDatabaseConfigured(),
     configuredPageId: config.facebookPageId,
     directPageTokenConfigured: hasDirectPageAccessToken(),
     bot: getBotState(state),
@@ -1312,6 +1358,27 @@ app.listen(config.port, async () => {
   console.log(`Server listening on port ${config.port}`);
   console.log(`Public base URL ${config.baseUrl}`);
   console.log("Dashboard login available on /");
+  if (isDatabaseConfigured()) {
+    try {
+      await initDatabase();
+      await ensureDatabaseSeededFromState(readState());
+      const snapshot = await loadDatabaseSnapshot();
+
+      if (snapshot) {
+        updateState((current) => {
+          current.queuedPosts = snapshot.queuedPosts;
+          current.posts = snapshot.posts;
+          current.queueCounter = Math.max(current.queueCounter, snapshot.queueCounter);
+          return current;
+        });
+      }
+
+      console.log("Postgres storage enabled");
+      syncScheduler();
+    } catch (error) {
+      console.error("[database] failed:", normalizeErrorMessage(error));
+    }
+  }
   if (hasDirectPageAccessToken()) {
     await refreshDirectPageProfile();
     console.log(`Direct page token mode enabled for page ${config.facebookPageId}`);
