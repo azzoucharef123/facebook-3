@@ -13,6 +13,9 @@ const defaultState = {
   queuedPosts: [],
   queueCounter: 0,
   posts: [],
+  ai: {
+    cache: []
+  },
   bot: {
     active: false,
     startedAt: ""
@@ -45,6 +48,10 @@ export function readState() {
       queuedPosts: Array.isArray(parsed.queuedPosts) ? parsed.queuedPosts : [],
       queueCounter: Number.isInteger(parsed.queueCounter) ? parsed.queueCounter : 0,
       posts: Array.isArray(parsed.posts) ? parsed.posts : [],
+      ai: {
+        ...structuredClone(defaultState.ai),
+        cache: Array.isArray(parsed.ai?.cache) ? parsed.ai.cache : []
+      },
       bot: {
         ...structuredClone(defaultState.bot),
         ...(parsed.bot || {})
