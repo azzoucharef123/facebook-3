@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import express from "express";
+import { generatePostsWithOpenRouter } from "./ai.js";
 import { config, getMissingCoreConfig } from "./config.js";
 import {
   deleteScheduledPost,
@@ -232,6 +233,30 @@ function parseQueuedPosts(rawText) {
 
 function getQueuedPosts(state = readState()) {
   return Array.isArray(state.queuedPosts) ? state.queuedPosts : [];
+}
+
+async function addPostsToQueue(postTexts) {
+  const currentState = readState();
+  let nextCounter = currentState.queueCounter;
+  const queuedEntries = postTexts.map((text) => {
+    nextCounter += 1;
+    return {
+      id: nextCounter,
+      text,
+      createdAt: new Date().toISOString()
+    };
+  });
+
+  await insertScheduledPosts(queuedEntries);
+
+  const nextState = updateState((current) => {
+    current.queueCounter = nextCounter;
+    current.queuedPosts.push(...queuedEntries);
+    return current;
+  });
+
+  syncScheduler();
+  return nextState;
 }
 
 function renderQueuedPostsList(queuedPosts) {
@@ -591,6 +616,29 @@ function renderQueuedPostsEditor(state) {
 
   return `
     <section class="section">
+      <h2>${icons.spark}<span>توليد منشورات بالذكاء الاصطناعي</span></h2>
+      <form id="aiPostsForm" method="post" action="/dashboard/content/ai">
+        ${renderField({
+          label: "اكتب موضوع الصفحة أو نوع المنشورات التي تريدها. مثال: نصائح تعليمية قصيرة لطلبة الفيزياء والكيمياء.",
+          name: "aiPrompt",
+          type: "textarea",
+          value: "",
+          rows: 6
+        })}
+        ${renderField({
+          label: "عدد المنشورات المطلوب توليدها",
+          name: "aiCount",
+          type: "number",
+          value: "3",
+          min: "1",
+          max: "10"
+        })}
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">توليد وإضافة للطابور</button>
+        </div>
+      </form>
+    </section>
+    <section class="section">
       <h2>${icons.edit}<span>إضافة منشورات جديدة</span></h2>
       <form id="bulkPostsForm" method="post" action="/dashboard/content">
         ${renderField({
@@ -621,17 +669,20 @@ function renderQueuedPostsEditor(state) {
     <script>
       (() => {
         const form = document.getElementById("bulkPostsForm");
+        const aiForm = document.getElementById("aiPostsForm");
         const modal = document.getElementById("contentResultModal");
         const title = document.getElementById("contentResultTitle");
         const message = document.getElementById("contentResultMessage");
         const okButton = document.getElementById("contentResultOk");
         const queuedPostsContainer = document.getElementById("queuedPostsContainer");
 
-        if (!form || !modal || !title || !message || !okButton || !queuedPostsContainer) {
+        if (!form || !aiForm || !modal || !title || !message || !okButton || !queuedPostsContainer) {
           return;
         }
 
         const textarea = form.querySelector('textarea[name="bulkText"]');
+        const aiTextarea = aiForm.querySelector('textarea[name="aiPrompt"]');
+        const aiCountInput = aiForm.querySelector('input[name="aiCount"]');
 
         const openModal = (nextTitle, nextMessage) => {
           title.textContent = nextTitle;
@@ -652,13 +703,11 @@ function renderQueuedPostsEditor(state) {
           }
         });
 
-        form.addEventListener("submit", async (event) => {
-          event.preventDefault();
-
-          const formData = new FormData(form);
+        const submitForm = async (activeForm, options = {}) => {
+          const formData = new FormData(activeForm);
 
           try {
-            const response = await fetch(form.action, {
+            const response = await fetch(activeForm.action, {
               method: "POST",
               headers: {
                 Accept: "application/json"
@@ -669,18 +718,44 @@ function renderQueuedPostsEditor(state) {
             const payload = await response.json();
 
             if (!response.ok || !payload.ok) {
-              openModal("تعذر إضافة المنشورات", payload.error || "حدث خطأ أثناء إضافة المنشورات.");
+              openModal(options.errorTitle || "تعذر إتمام العملية", payload.error || "حدث خطأ أثناء تنفيذ الطلب.");
               return;
             }
 
             queuedPostsContainer.innerHTML = payload.queueHtml || "";
-            if (textarea) {
+            if (options.resetManual && textarea) {
               textarea.value = "";
             }
-            openModal("تمت إضافة المنشورات", payload.message || "تمت العملية بنجاح.");
+            if (options.resetAi) {
+              if (aiTextarea) {
+                aiTextarea.value = "";
+              }
+              if (aiCountInput) {
+                aiCountInput.value = "3";
+              }
+            }
+            openModal(options.successTitle || "تمت العملية", payload.message || "تمت العملية بنجاح.");
           } catch (error) {
-            openModal("تعذر إضافة المنشورات", "تعذر الاتصال بالخادم. حاول مرة أخرى.");
+            openModal(options.errorTitle || "تعذر إتمام العملية", "تعذر الاتصال بالخادم. حاول مرة أخرى.");
           }
+        };
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          await submitForm(form, {
+            resetManual: true,
+            successTitle: "تمت إضافة المنشورات",
+            errorTitle: "تعذر إضافة المنشورات"
+          });
+        });
+
+        aiForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          await submitForm(aiForm, {
+            resetAi: true,
+            successTitle: "تم توليد المنشورات",
+            errorTitle: "تعذر توليد المنشورات"
+          });
         });
       })();
     </script>
@@ -1185,27 +1260,7 @@ app.post("/dashboard/content", ensureDashboardAuth, async (req, res) => {
   }
 
   try {
-    const currentState = readState();
-    let nextCounter = currentState.queueCounter;
-    const createdAt = new Date().toISOString();
-    const queuedEntries = posts.map((text) => {
-      nextCounter += 1;
-      return {
-        id: nextCounter,
-        text,
-        createdAt
-      };
-    });
-
-    await insertScheduledPosts(queuedEntries);
-
-    const nextState = updateState((current) => {
-      current.queueCounter = nextCounter;
-      current.queuedPosts.push(...queuedEntries);
-      return current;
-    });
-
-    syncScheduler();
+    const nextState = await addPostsToQueue(posts);
 
     if (wantsJson) {
       res.json({
@@ -1221,6 +1276,59 @@ app.post("/dashboard/content", ensureDashboardAuth, async (req, res) => {
     });
   } catch (error) {
     const message = `تعذر حفظ المنشورات: ${normalizeErrorMessage(error)}`;
+
+    if (wantsJson) {
+      res.status(500).json({ ok: false, error: message });
+      return;
+    }
+
+    redirectWithMessage(res, "/dashboard/content", { error: message });
+  }
+});
+
+app.post("/dashboard/content/ai", ensureDashboardAuth, async (req, res) => {
+  const wantsJson = (req.headers.accept || "").includes("application/json");
+  const aiPrompt = String(req.body.aiPrompt || "").trim();
+  const aiCount = Math.min(10, Math.max(1, Number.parseInt(String(req.body.aiCount || "3"), 10) || 3));
+
+  if (!aiPrompt) {
+    const error = "اكتب وصفًا واضحًا للمنشورات التي تريد توليدها.";
+    if (wantsJson) {
+      res.status(400).json({ ok: false, error });
+      return;
+    }
+
+    redirectWithMessage(res, "/dashboard/content", { error });
+    return;
+  }
+
+  try {
+    const state = readState();
+    const existingPosts = [
+      ...getQueuedPosts(state).map((post) => post.text),
+      ...state.posts.slice(-8).map((post) => post.message)
+    ];
+    const generatedPosts = await generatePostsWithOpenRouter({
+      prompt: aiPrompt,
+      count: aiCount,
+      existingPosts
+    });
+    const nextState = await addPostsToQueue(generatedPosts);
+
+    if (wantsJson) {
+      res.json({
+        ok: true,
+        message: `تم توليد ${generatedPosts.length} منشور(ات) وإضافتها إلى الطابور.`,
+        queueHtml: renderQueuedPostsList(getQueuedPosts(nextState))
+      });
+      return;
+    }
+
+    redirectWithMessage(res, "/dashboard/content", {
+      notice: `تم توليد ${generatedPosts.length} منشور(ات) وإضافتها إلى الطابور.`
+    });
+  } catch (error) {
+    const message = `تعذر توليد المنشورات: ${normalizeErrorMessage(error)}`;
 
     if (wantsJson) {
       res.status(500).json({ ok: false, error: message });

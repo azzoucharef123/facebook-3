@@ -33,6 +33,8 @@ export const config = {
   baseUrl: computeBaseUrl(),
   dashboardAccessCode: "5598",
   databaseUrl: process.env.DATABASE_URL || "",
+  openRouterApiKey: process.env.OPENROUTER_API_KEY || "",
+  openRouterModel: process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct",
   facebookAppId: process.env.FB_APP_ID || "",
   facebookAppSecret: process.env.FB_APP_SECRET || "",
   facebookPageId: process.env.FB_PAGE_ID || "",
