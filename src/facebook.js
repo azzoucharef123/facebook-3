@@ -17,22 +17,42 @@ function buildGraphUrl(pathname, params = {}) {
 async function graphRequest(pathname, options = {}) {
   const { method = "GET", query = {}, body } = options;
   const url = buildGraphUrl(pathname, query);
+  let requestBody;
+  let headers;
+
+  if (body && method !== "GET") {
+    const form = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(body)) {
+      if (value !== undefined && value !== null && value !== "") {
+        form.set(key, String(value));
+      }
+    }
+
+    headers = {
+      "Content-Type": "application/x-www-form-urlencoded"
+    };
+    requestBody = form.toString();
+  }
 
   const response = await fetch(url, {
     method,
-    headers: body
-      ? {
-          "Content-Type": "application/json"
-        }
-      : undefined,
-    body: body ? JSON.stringify(body) : undefined
+    headers,
+    body: requestBody
   });
 
-  const payload = await response.json();
+  const raw = await response.text();
+  let payload = {};
+
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch {
+    payload = { raw };
+  }
 
   if (!response.ok || payload.error) {
     const message =
-      payload?.error?.message || `Facebook request failed with ${response.status}`;
+      payload?.error?.message || payload?.raw || `Facebook request failed with ${response.status}`;
     throw new Error(message);
   }
 

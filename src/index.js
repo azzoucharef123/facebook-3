@@ -1160,6 +1160,8 @@ app.post("/dashboard/content", ensureDashboardAuth, async (req, res) => {
       return current;
     });
 
+    syncScheduler();
+
     if (wantsJson) {
       res.json({
         ok: true,
@@ -1194,6 +1196,8 @@ app.post("/dashboard/content/delete/:id", ensureDashboardAuth, async (req, res) 
       current.queuedPosts = current.queuedPosts.filter((post) => post.id !== id);
       return current;
     });
+
+    syncScheduler();
 
     redirectWithMessage(res, "/dashboard/content", {
       notice: `تم حذف المنشور رقم ${id}.`
