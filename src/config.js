@@ -13,7 +13,12 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 function computeBaseUrl() {
   if (process.env.BASE_URL) {
-    return process.env.BASE_URL;
+    const raw = process.env.BASE_URL.trim();
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      return raw;
+    }
+
+    return `https://${raw}`;
   }
 
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {

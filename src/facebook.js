@@ -115,10 +115,8 @@ export async function getManagedPages(userAccessToken) {
 export async function publishPagePost({ pageId, pageAccessToken, message }) {
   return graphRequest(`/${pageId}/feed`, {
     method: "POST",
-    query: {
-      access_token: pageAccessToken
-    },
     body: {
+      access_token: pageAccessToken,
       message,
       published: true
     }
