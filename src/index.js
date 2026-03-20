@@ -878,29 +878,39 @@ async function buildPostsBody(state) {
 
 async function buildAudienceBody(state) {
   const connection = getResolvedPageConnection(state);
-  if (!connection.pageAccessToken || !state.posts.length) {
+  if (!connection.pageAccessToken) {
     return `
       <section class="section">
         <h2>${icons.people}<span>الأشخاص المتفاعلون</span></h2>
-        <div class="empty">لا توجد بيانات تفاعل بعد. بعد نشر منشورات ووجود تعليقات سيظهر الأشخاص هنا.</div>
+        <div class="empty">لا يوجد توكن صالح للصفحة لقراءة بيانات التفاعل الآن.</div>
       </section>
     `;
   }
 
+  let profile = null;
+  try {
+    profile = await getPageProfile({
+      pageId: connection.pageId,
+      pageAccessToken: connection.pageAccessToken
+    });
+  } catch {}
+
   const recentPosts = state.posts.slice(-8);
-  const commentGroups = await Promise.all(
-    recentPosts.map(async (post) => {
-      try {
-        return await getPostComments({
-          postId: post.id,
-          pageAccessToken: connection.pageAccessToken,
-          limit: 15
-        });
-      } catch {
-        return [];
-      }
-    })
-  );
+  const commentGroups = recentPosts.length
+    ? await Promise.all(
+        recentPosts.map(async (post) => {
+          try {
+            return await getPostComments({
+              postId: post.id,
+              pageAccessToken: connection.pageAccessToken,
+              limit: 15
+            });
+          } catch {
+            return [];
+          }
+        })
+      )
+    : [];
 
   const audience = new Map();
   for (const comments of commentGroups) {
@@ -932,6 +942,18 @@ async function buildAudienceBody(state) {
     <section class="section">
       <h2>${icons.people}<span>الأشخاص المتفاعلون</span></h2>
       ${renderMetrics([
+        {
+          label: "إجمالي المعجبين",
+          value: String(profile?.fan_count ?? 0),
+          note: "إجمالي الإعجابات على الصفحة",
+          icon: icons.people
+        },
+        {
+          label: "إجمالي المتابعين",
+          value: String(profile?.followers_count ?? 0),
+          note: "إجمالي المتابعين الحاليين",
+          icon: icons.people
+        },
         { label: "إجمالي الأشخاص", value: String(topPeople.length), icon: icons.people },
         { label: "المنشورات المفحوصة", value: String(recentPosts.length), icon: icons.posts },
         { label: "مصدر البيانات", value: "تعليقات أحدث المنشورات", icon: icons.status }
