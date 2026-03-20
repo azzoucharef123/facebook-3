@@ -14,7 +14,7 @@
 ضع هذه القيم في `.env` أو Railway:
 
 - `DATABASE_URL`
-- `OPENROUTER_API_KEY`
+- `OPENAI_API_KEY`
 - `FB_PAGE_ID`
 - `FB_PAGE_ACCESS_TOKEN`
 - `POST_INTERVAL_MINUTES`
@@ -24,7 +24,7 @@
 
 - `BASE_URL`
 - `STATE_DIR`
-- `OPENROUTER_MODEL`
+- `OPENAI_MODEL`
 - `FB_APP_ID`
 - `FB_APP_SECRET`
 
@@ -87,7 +87,7 @@ http://localhost:3000
 
 ## توليد المنشورات بالذكاء الاصطناعي
 
-- داخل `إدارة المنشورات` يوجد الآن قسم لتوليد منشورات عبر OpenRouter
+- داخل `إدارة المنشورات` يوجد الآن قسم لتوليد منشورات عبر OpenAI
 - ضع وصفًا واضحًا للموضوع
 - اختر عدد المنشورات
 - اضغط `توليد وإضافة للطابور`
